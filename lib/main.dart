@@ -4,6 +4,7 @@ import 'services/gemma_service.dart';
 import 'services/performance_monitor.dart';
 import 'screens/setup_screen.dart';
 import 'screens/chat_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,21 +36,9 @@ class OnDeviceAIApp extends StatelessWidget {
     return MaterialApp(
       title: 'On-Device AI',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4285F4),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4285F4),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      themeMode: ThemeMode.system,
+      theme: AppTheme.darkTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.dark,
       home: AppShell(
         gemmaService: gemmaService,
         performanceMonitor: performanceMonitor,
