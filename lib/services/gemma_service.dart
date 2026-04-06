@@ -4,13 +4,20 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 
-/// Manages Gemma 4 E2B model lifecycle: download, initialization, inference.
+/// Manages Gemma model lifecycle: download, initialization, inference.
 ///
-/// Uses flutter_gemma's Modern API with LiteRT-LM (.litertlm) format.
-/// Model is downloaded from HuggingFace on first launch, then cached locally.
+/// Platform-aware model selection:
+/// - Android: Gemma 4 E2B (.litertlm, 2.4 GB) via LiteRT-LM
+/// - iOS: Gemma 3 1B IT (.task, 0.5 GB) via MediaPipe
+///   (.litertlm crashes on iOS — Metal GPU delegate not supported yet)
 class GemmaService extends ChangeNotifier {
-  static const String _modelUrl =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+  // iOS uses .task format (MediaPipe), Android uses .litertlm (LiteRT-LM)
+  static String get _modelUrl => Platform.isIOS
+      ? 'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task'
+      : 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+
+  static ModelFileType get _fileType =>
+      Platform.isIOS ? ModelFileType.task : ModelFileType.litertlm;
 
   static const int _maxTokens = 2048;
   static const int _maxGenerationTokens = 512;
@@ -56,7 +63,7 @@ class GemmaService extends ChangeNotifier {
     try {
       await FlutterGemma.installModel(
         modelType: ModelType.gemmaIt,
-        fileType: ModelFileType.litertlm,
+        fileType: _fileType,
       )
           .fromNetwork(_modelUrl)
           .withProgress((progress) {
@@ -172,9 +179,9 @@ class GemmaService extends ChangeNotifier {
   /// Get the preferred backend description for the current platform.
   String get backendInfo {
     if (Platform.isIOS) {
-      return 'Metal GPU (iOS)';
+      return 'Gemma 3 1B · Metal';
     } else if (Platform.isAndroid) {
-      return 'GPU/NPU (Android)';
+      return 'Gemma 4 E2B · GPU';
     }
     return 'Unknown';
   }
