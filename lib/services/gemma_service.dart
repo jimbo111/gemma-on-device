@@ -12,8 +12,9 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 ///   (.litertlm crashes on iOS — Metal GPU delegate not supported yet)
 class GemmaService extends ChangeNotifier {
   // iOS uses .task format (MediaPipe), Android uses .litertlm (LiteRT-LM)
+  // Both from litert-community (public, no HuggingFace auth needed)
   static String get _modelUrl => Platform.isIOS
-      ? 'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task'
+      ? 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task'
       : 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
 
   static ModelFileType get _fileType =>
@@ -179,7 +180,7 @@ class GemmaService extends ChangeNotifier {
   /// Get the preferred backend description for the current platform.
   String get backendInfo {
     if (Platform.isIOS) {
-      return 'Gemma 3 1B · Metal';
+      return 'Gemma 4 E2B · Metal';
     } else if (Platform.isAndroid) {
       return 'Gemma 4 E2B · GPU';
     }
