@@ -10,7 +10,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 /// Model is downloaded from HuggingFace on first launch, then cached locally.
 class GemmaService extends ChangeNotifier {
   static const String _modelUrl =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma3-E2B-it-multi.litertlm';
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
 
   static const int _maxTokens = 2048;
   static const int _maxGenerationTokens = 512;
