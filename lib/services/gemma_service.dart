@@ -11,11 +11,20 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 /// - iOS: Gemma 3 1B IT (.task, 0.5 GB) via MediaPipe
 ///   (.litertlm crashes on iOS — Metal GPU delegate not supported yet)
 class GemmaService extends ChangeNotifier {
-  // Gemma 4 E2B on both platforms (public, no HuggingFace auth needed)
-  // iOS: CPU backend (.litertlm — Metal GPU delegate not supported yet)
-  // Android: GPU backend (.litertlm via LiteRT-LM)
-  static const String _modelUrl =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+  // iOS: .task format required (MediaPipe). .litertlm crashes on iOS.
+  // Android: .litertlm via LiteRT-LM (Gemma 4 E2B)
+  //
+  // To use Gemma on iOS, set a HuggingFace token in initFramework() and
+  // change _modelUrl to a gated Gemma .task model.
+  static String get _modelUrl => Platform.isIOS
+      ? 'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task'
+      : 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+
+  static ModelFileType get _fileType =>
+      Platform.isIOS ? ModelFileType.task : ModelFileType.litertlm;
+
+  static ModelType get _modelType =>
+      Platform.isIOS ? ModelType.qwen : ModelType.gemmaIt;
 
   static const int _maxTokens = 2048;
   static const int _maxGenerationTokens = 512;
@@ -60,8 +69,8 @@ class GemmaService extends ChangeNotifier {
 
     try {
       await FlutterGemma.installModel(
-        modelType: ModelType.gemmaIt,
-        fileType: ModelFileType.litertlm,
+        modelType: _modelType,
+        fileType: _fileType,
       )
           .fromNetwork(_modelUrl)
           .withProgress((progress) {
@@ -87,14 +96,9 @@ class GemmaService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // iOS: CPU backend (Metal GPU delegate doesn't support .litertlm yet)
-      // Android: GPU backend (LiteRT-LM native support)
-      final backend =
-          Platform.isIOS ? PreferredBackend.cpu : PreferredBackend.gpu;
-
       _model = await FlutterGemma.getActiveModel(
         maxTokens: _maxTokens,
-        preferredBackend: backend,
+        preferredBackend: PreferredBackend.gpu,
       );
 
       _chat = await _model!.createChat(
@@ -102,7 +106,7 @@ class GemmaService extends ChangeNotifier {
         topK: 40,
         topP: 0.95,
         tokenBuffer: 256,
-        modelType: ModelType.gemmaIt,
+        modelType: _modelType,
       );
 
       _state = GemmaServiceState.ready;
@@ -182,7 +186,7 @@ class GemmaService extends ChangeNotifier {
   /// Get the preferred backend description for the current platform.
   String get backendInfo {
     if (Platform.isIOS) {
-      return 'Gemma 4 E2B · CPU';
+      return 'Qwen 2.5 · Metal';
     } else if (Platform.isAndroid) {
       return 'Gemma 4 E2B · GPU';
     }

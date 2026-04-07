@@ -123,7 +123,7 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _isGenerating = false;
             _messages[aiMessageIndex] = _ChatMessage(
-              text: 'Error: $error',
+              text: 'Something went wrong. Please try again.',
               isUser: false,
             );
           });
@@ -134,7 +134,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _isGenerating = false;
         _messages[aiMessageIndex] = _ChatMessage(
-          text: 'Error: $e',
+          text: 'Something went wrong. Please try again.',
           isUser: false,
         );
       });
@@ -160,52 +160,59 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _kBgColor,
-      appBar: _buildAppBar(),
-      body: Column(
-        children: [
-          _PerformanceBar(
-            gemmaService: widget.gemmaService,
-            performanceMonitor: widget.performanceMonitor,
-          ),
-          // Messages list
-          Expanded(
-            child: _messages.isEmpty
-                ? const _EmptyState()
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        backgroundColor: _kBgColor,
+        appBar: _buildAppBar(),
+        body: Column(
+          children: [
+            _PerformanceBar(
+              gemmaService: widget.gemmaService,
+              performanceMonitor: widget.performanceMonitor,
+            ),
+            // Messages list
+            Expanded(
+              child: _messages.isEmpty
+                  ? const _EmptyState()
+                  : ListView.builder(
+                      controller: _scrollController,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      itemCount: _messages.length +
+                          (_isGenerating && _messages.last.text.isEmpty
+                              ? 1
+                              : 0),
+                      itemBuilder: (context, index) {
+                        if (index >= _messages.length) {
+                          return const TypingIndicator();
+                        }
+                        final msg = _messages[index];
+                        return ChatBubble(
+                          text: msg.text,
+                          isUser: msg.isUser,
+                          isStreaming: _isGenerating &&
+                              index == _messages.length - 1 &&
+                              !msg.isUser,
+                        );
+                      },
                     ),
-                    itemCount: _messages.length +
-                        (_isGenerating && _messages.last.text.isEmpty ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index >= _messages.length) {
-                        return const TypingIndicator();
-                      }
-                      final msg = _messages[index];
-                      return ChatBubble(
-                        text: msg.text,
-                        isUser: msg.isUser,
-                        isStreaming: _isGenerating &&
-                            index == _messages.length - 1 &&
-                            !msg.isUser,
-                      );
-                    },
-                  ),
-          ),
+            ),
 
-          // Floating input bar
-          _InputBar(
-            controller: _textController,
-            focusNode: _focusNode,
-            isGenerating: _isGenerating,
-            onSend: _sendMessage,
-            onStop: _stopGeneration,
-          ),
-        ],
+            // Floating input bar
+            _InputBar(
+              controller: _textController,
+              focusNode: _focusNode,
+              isGenerating: _isGenerating,
+              onSend: _sendMessage,
+              onStop: _stopGeneration,
+            ),
+          ],
+        ),
       ),
     );
   }
