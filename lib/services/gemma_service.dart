@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
@@ -11,20 +10,10 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 /// - iOS: Gemma 3 1B IT (.task, 0.5 GB) via MediaPipe
 ///   (.litertlm crashes on iOS — Metal GPU delegate not supported yet)
 class GemmaService extends ChangeNotifier {
-  // iOS: .task format required (MediaPipe). .litertlm crashes on iOS.
-  // Android: .litertlm via LiteRT-LM (Gemma 4 E2B)
-  //
-  // To use Gemma on iOS, set a HuggingFace token in initFramework() and
-  // change _modelUrl to a gated Gemma .task model.
-  static String get _modelUrl => Platform.isIOS
-      ? 'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task'
-      : 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
-
-  static ModelFileType get _fileType =>
-      Platform.isIOS ? ModelFileType.task : ModelFileType.litertlm;
-
-  static ModelType get _modelType =>
-      Platform.isIOS ? ModelType.qwen : ModelType.gemmaIt;
+  // Gemma 4 E2B via LiteRT-LM — public, no HuggingFace auth needed.
+  // Android only. iOS support pending Google's LiteRT-LM Swift API.
+  static const String _modelUrl =
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
 
   static const int _maxTokens = 2048;
   static const int _maxGenerationTokens = 512;
@@ -69,8 +58,8 @@ class GemmaService extends ChangeNotifier {
 
     try {
       await FlutterGemma.installModel(
-        modelType: _modelType,
-        fileType: _fileType,
+        modelType: ModelType.gemmaIt,
+        fileType: ModelFileType.litertlm,
       )
           .fromNetwork(_modelUrl)
           .withProgress((progress) {
@@ -106,7 +95,7 @@ class GemmaService extends ChangeNotifier {
         topK: 40,
         topP: 0.95,
         tokenBuffer: 256,
-        modelType: _modelType,
+        modelType: ModelType.gemmaIt,
       );
 
       _state = GemmaServiceState.ready;
@@ -184,14 +173,7 @@ class GemmaService extends ChangeNotifier {
   }
 
   /// Get the preferred backend description for the current platform.
-  String get backendInfo {
-    if (Platform.isIOS) {
-      return 'Qwen 2.5 · Metal';
-    } else if (Platform.isAndroid) {
-      return 'Gemma 4 E2B · GPU';
-    }
-    return 'Unknown';
-  }
+  String get backendInfo => 'Gemma 4 E2B · GPU';
 
   /// Tokens per second from the last generation.
   double get tokensPerSecond {
