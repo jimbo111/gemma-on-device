@@ -61,6 +61,10 @@ class _SetupScreenState extends State<SetupScreen>
 
   Future<void> _startSetup() async {
     try {
+      // Step 0: Framework init (idempotent). Done here so failures surface
+      // through this retry flow rather than crashing at app launch.
+      await widget.gemmaService.initFramework();
+
       // Step 1: Check if model is already installed
       final installed = await widget.gemmaService.isModelInstalled();
 
@@ -126,7 +130,18 @@ class _SetupScreenState extends State<SetupScreen>
                 _RetryButton(onRetry: _retry),
               ],
               const Spacer(flex: 1),
-              const _OfflineInfoCard(),
+              // Don't advertise "100% offline" while actively downloading —
+              // the user is demonstrably online at that moment.
+              ListenableBuilder(
+                listenable: widget.gemmaService,
+                builder: (context, _) {
+                  if (widget.gemmaService.state ==
+                      GemmaServiceState.downloading) {
+                    return const SizedBox.shrink();
+                  }
+                  return const _OfflineInfoCard();
+                },
+              ),
               const SizedBox(height: 24),
             ],
           ),
@@ -217,16 +232,26 @@ class _ProgressSection extends StatelessWidget {
     required this.hasError,
   });
 
+  bool get _showDownloadCard => state == GemmaServiceState.downloading;
+
+  bool get _showSpinner {
+    if (hasError) return false;
+    // Explicitly list the "working, no progress bar yet" states so future
+    // enum additions don't silently start showing a spinner.
+    return state == GemmaServiceState.uninitialized ||
+        state == GemmaServiceState.downloaded ||
+        state == GemmaServiceState.loading;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (state == GemmaServiceState.downloading) ...[
+        if (_showDownloadCard) ...[
           _DownloadProgressCard(progress: progress),
           const SizedBox(height: 20),
-        ] else if (state == GemmaServiceState.loading ||
-            (!hasError && state != GemmaServiceState.error)) ...[
+        ] else if (_showSpinner) ...[
           const SizedBox(
             width: 36,
             height: 36,

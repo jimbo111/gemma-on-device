@@ -6,18 +6,14 @@ import 'screens/setup_screen.dart';
 import 'screens/chat_screen.dart';
 import 'theme/app_theme.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final gemmaService = GemmaService();
-  final performanceMonitor = PerformanceMonitor();
-
-  // Initialize flutter_gemma framework before runApp
-  await gemmaService.initFramework();
-
+  // Framework init is deferred to SetupScreen so any failure surfaces through
+  // the normal retry UI rather than crashing to a black screen pre-runApp.
   runApp(OnDeviceAIApp(
-    gemmaService: gemmaService,
-    performanceMonitor: performanceMonitor,
+    gemmaService: GemmaService(),
+    performanceMonitor: PerformanceMonitor(),
   ));
 }
 

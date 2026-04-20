@@ -55,23 +55,47 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  /// Threshold (in logical pixels) within which we still consider the user
+  /// to be "at the bottom" of the scroll view. Lets us respect manual
+  /// scroll-back without stealing the viewport on every token.
+  static const double _autoScrollThreshold = 64.0;
+
+  bool _isNearBottom() {
+    if (!_scrollController.hasClients) return true;
+    final pos = _scrollController.position;
+    return pos.maxScrollExtent - pos.pixels <= _autoScrollThreshold;
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _failGeneration(int aiMessageIndex) {
+    if (!mounted) return;
+    setState(() {
+      _isGenerating = false;
+      if (aiMessageIndex < _messages.length) {
+        _messages[aiMessageIndex] = const _ChatMessage(
+          text: 'Something went wrong. Please try again.',
+          isUser: false,
         );
       }
     });
+    widget.performanceMonitor.endSession();
   }
 
   Future<void> _sendMessage() async {
     final text = _textController.text.trim();
     if (text.isEmpty || _isGenerating) return;
 
-    // Check throttle
+    // Check throttle before mutating state so the typed message is preserved.
     if (widget.performanceMonitor.shouldReduceLoad) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -88,18 +112,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _textController.clear();
     _focusNode.requestFocus();
 
-    // Add user message
+    // Add user message + empty AI placeholder for streaming.
     setState(() {
       _messages.add(_ChatMessage(text: text, isUser: true));
+      _messages.add(const _ChatMessage(text: '', isUser: false));
       _isGenerating = true;
     });
+    final aiMessageIndex = _messages.length - 1;
     _scrollToBottom();
-
-    // Add empty AI message for streaming
-    final aiMessageIndex = _messages.length;
-    setState(() {
-      _messages.add(_ChatMessage(text: '', isUser: false));
-    });
 
     widget.performanceMonitor.startSession();
 
@@ -107,51 +127,63 @@ class _ChatScreenState extends State<ChatScreen> {
       final stream = widget.gemmaService.sendMessage(text);
       _generationSub = stream.listen(
         (token) {
+          if (!mounted) return;
+          // Capture scroll state *before* the new token grows maxScrollExtent
+          // so an auto-scroll only fires if the user was already at the bottom.
+          final shouldStick = _isNearBottom();
           setState(() {
-            _messages[aiMessageIndex] = _ChatMessage(
-              text: _messages[aiMessageIndex].text + token,
-              isUser: false,
-            );
+            if (aiMessageIndex < _messages.length) {
+              _messages[aiMessageIndex] = _ChatMessage(
+                text: _messages[aiMessageIndex].text + token,
+                isUser: false,
+              );
+            }
           });
-          _scrollToBottom();
+          if (shouldStick) _scrollToBottom();
         },
         onDone: () {
+          if (!mounted) return;
           setState(() => _isGenerating = false);
           widget.performanceMonitor.endSession();
         },
-        onError: (error) {
-          setState(() {
-            _isGenerating = false;
-            _messages[aiMessageIndex] = _ChatMessage(
-              text: 'Something went wrong. Please try again.',
-              isUser: false,
-            );
-          });
-          widget.performanceMonitor.endSession();
+        onError: (_) async {
+          // Ensure the native side is stopped; the async* generator's finally
+          // usually handles this, but errors surfacing via the subscriber
+          // don't guarantee it, and a lingering `generating` state would
+          // wedge the next sendMessage call.
+          await widget.gemmaService.stopGeneration();
+          _failGeneration(aiMessageIndex);
         },
       );
-    } catch (e) {
-      setState(() {
-        _isGenerating = false;
-        _messages[aiMessageIndex] = _ChatMessage(
-          text: 'Something went wrong. Please try again.',
-          isUser: false,
-        );
-      });
-      widget.performanceMonitor.endSession();
+    } catch (_) {
+      await widget.gemmaService.stopGeneration();
+      _failGeneration(aiMessageIndex);
     }
   }
 
   Future<void> _stopGeneration() async {
-    _generationSub?.cancel();
+    final sub = _generationSub;
+    _generationSub = null;
+    await sub?.cancel();
     await widget.gemmaService.stopGeneration();
     widget.performanceMonitor.endSession();
+    if (!mounted) return;
     setState(() => _isGenerating = false);
   }
 
   Future<void> _clearChat() async {
-    _generationSub?.cancel();
+    // Fully tear down any in-flight generation BEFORE clearing history.
+    // InferenceChat.clearHistory() closes and re-creates the native session,
+    // which would race with an active generateChatResponseAsync loop.
+    final sub = _generationSub;
+    _generationSub = null;
+    await sub?.cancel();
+    if (_isGenerating) {
+      await widget.gemmaService.stopGeneration();
+      widget.performanceMonitor.endSession();
+    }
     await widget.gemmaService.clearChat();
+    if (!mounted) return;
     setState(() {
       _messages.clear();
       _isGenerating = false;
@@ -203,13 +235,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
             ),
 
-            // Floating input bar
-            _InputBar(
-              controller: _textController,
-              focusNode: _focusNode,
-              isGenerating: _isGenerating,
-              onSend: _sendMessage,
-              onStop: _stopGeneration,
+            // Floating input bar — rebuilds when throttle state changes so
+            // the send button accurately reflects whether a send will succeed.
+            ListenableBuilder(
+              listenable: widget.performanceMonitor,
+              builder: (context, _) => _InputBar(
+                controller: _textController,
+                focusNode: _focusNode,
+                isGenerating: _isGenerating,
+                isThrottled: widget.performanceMonitor.shouldReduceLoad,
+                onSend: _sendMessage,
+                onStop: _stopGeneration,
+              ),
             ),
           ],
         ),
@@ -262,19 +299,6 @@ class _PerformanceBar extends StatelessWidget {
     required this.performanceMonitor,
   });
 
-  Color _thermalColor(ThermalState state) {
-    switch (state) {
-      case ThermalState.nominal:
-        return _kAccentColor;
-      case ThermalState.fair:
-        return Colors.orange;
-      case ThermalState.serious:
-        return Colors.deepOrange;
-      case ThermalState.critical:
-        return _kErrorColor;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -282,8 +306,7 @@ class _PerformanceBar extends StatelessWidget {
       builder: (context, _) {
         final isGenerating = gemmaService.isGenerating;
         final tps = gemmaService.tokensPerSecond;
-        final thermal = performanceMonitor.thermalState;
-        final showThermal = thermal != ThermalState.nominal;
+        final throttled = performanceMonitor.isThrottled;
 
         return Container(
           width: double.infinity,
@@ -347,18 +370,18 @@ class _PerformanceBar extends StatelessWidget {
                 const SizedBox(width: 8),
               ],
 
-              // Thermal indicator
-              if (showThermal) ...[
-                Icon(
-                  Icons.thermostat_rounded,
+              // Cooldown indicator (session-time cap hit).
+              if (throttled) ...[
+                const Icon(
+                  Icons.pause_circle_outline,
                   size: 13,
-                  color: _thermalColor(thermal),
+                  color: _kErrorColor,
                 ),
                 const SizedBox(width: 3),
-                Text(
-                  thermal.name.toUpperCase(),
+                const Text(
+                  'COOLDOWN',
                   style: TextStyle(
-                    color: _thermalColor(thermal),
+                    color: _kErrorColor,
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.4,
@@ -431,6 +454,7 @@ class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isGenerating;
+  final bool isThrottled;
   final VoidCallback onSend;
   final VoidCallback onStop;
 
@@ -438,6 +462,7 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.isGenerating,
+    required this.isThrottled,
     required this.onSend,
     required this.onStop,
   });
@@ -445,6 +470,7 @@ class _InputBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+    final canSend = !isGenerating && !isThrottled;
 
     return Container(
       padding: EdgeInsets.fromLTRB(12, 10, 12, 10 + bottomPadding),
@@ -464,7 +490,12 @@ class _InputBar extends StatelessWidget {
                 maxLines: 4,
                 minLines: 1,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                // Guard hardware-keyboard Enter from firing during generation
+                // or throttle — the _sendMessage guard would silently drop
+                // the user's typed text.
+                onSubmitted: (_) {
+                  if (canSend) onSend();
+                },
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 15,
@@ -518,12 +549,14 @@ class _InputBar extends StatelessWidget {
               listenable: controller,
               builder: (context, _) {
                 final hasText = controller.text.trim().isNotEmpty;
+                final enabled = hasText && !isThrottled;
                 return _ActionButton(
-                  onPressed: hasText ? onSend : null,
-                  backgroundColor: hasText ? _kAccentColor : _kDisabledColor,
+                  onPressed: enabled ? onSend : null,
+                  backgroundColor:
+                      enabled ? _kAccentColor : _kDisabledColor,
                   child: Icon(
                     Icons.arrow_upward_rounded,
-                    color: hasText ? Colors.white : Colors.white30,
+                    color: enabled ? Colors.white : Colors.white30,
                     size: 22,
                   ),
                 );

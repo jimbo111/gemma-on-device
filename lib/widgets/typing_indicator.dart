@@ -67,17 +67,17 @@ class _TypingIndicatorState extends State<TypingIndicator>
   @override
   Widget build(BuildContext context) {
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: AlignmentDirectional.centerStart,
       child: Container(
-        margin: const EdgeInsets.only(right: 48, bottom: 8),
+        margin: const EdgeInsetsDirectional.only(end: 48, bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: const BoxDecoration(
           color: _kAiBubbleColor,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(_kBubbleRadius),
-            topRight: Radius.circular(_kBubbleRadius),
-            bottomLeft: Radius.circular(_kTailRadius),
-            bottomRight: Radius.circular(_kBubbleRadius),
+          borderRadius: BorderRadiusDirectional.only(
+            topStart: Radius.circular(_kBubbleRadius),
+            topEnd: Radius.circular(_kBubbleRadius),
+            bottomStart: Radius.circular(_kTailRadius),
+            bottomEnd: Radius.circular(_kBubbleRadius),
           ),
           boxShadow: [
             BoxShadow(
@@ -126,7 +126,7 @@ class _AnimatedDot extends StatelessWidget {
     final opacity = (0.35 + animation.value * 0.65).clamp(0.0, 1.0);
 
     return Padding(
-      padding: EdgeInsets.only(right: isLast ? 0.0 : 6.0),
+      padding: EdgeInsetsDirectional.only(end: isLast ? 0.0 : 6.0),
       child: Opacity(
         opacity: opacity,
         child: Transform.scale(

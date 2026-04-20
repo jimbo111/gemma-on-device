@@ -24,6 +24,7 @@ class GemmaService extends ChangeNotifier {
   GemmaServiceState _state = GemmaServiceState.uninitialized;
   double _downloadProgress = 0.0;
   String? _error;
+  bool _frameworkInitialized = false;
 
   // Performance tracking
   int _tokensGenerated = 0;
@@ -36,12 +37,15 @@ class GemmaService extends ChangeNotifier {
   bool get isGenerating => _state == GemmaServiceState.generating;
   int get tokensGenerated => _tokensGenerated;
 
-  /// Initialize the FlutterGemma framework. Call once at app startup.
+  /// Initialize the FlutterGemma framework. Idempotent — safe to call from
+  /// the setup flow so a failure surfaces through the normal retry path.
   Future<void> initFramework({String? huggingFaceToken}) async {
+    if (_frameworkInitialized) return;
     await FlutterGemma.initialize(
       huggingFaceToken: huggingFaceToken,
       maxDownloadRetries: 10,
     );
+    _frameworkInitialized = true;
   }
 
   /// Check if the model is already installed locally.
@@ -51,6 +55,11 @@ class GemmaService extends ChangeNotifier {
 
   /// Download and install the Gemma 4 E2B model from HuggingFace.
   Future<void> downloadModel() async {
+    if (_state == GemmaServiceState.downloading ||
+        _state == GemmaServiceState.loading ||
+        _state == GemmaServiceState.generating) {
+      throw StateError('Cannot start download while ${_state.name}.');
+    }
     _state = GemmaServiceState.downloading;
     _downloadProgress = 0.0;
     _error = null;
@@ -80,6 +89,10 @@ class GemmaService extends ChangeNotifier {
   /// Load the model into memory and create a chat session.
   /// Call during splash screen for background warm-up.
   Future<void> loadModel() async {
+    if (_state == GemmaServiceState.loading ||
+        _state == GemmaServiceState.generating) {
+      throw StateError('Cannot load while ${_state.name}.');
+    }
     _state = GemmaServiceState.loading;
     _error = null;
     notifyListeners();
@@ -122,6 +135,7 @@ class GemmaService extends ChangeNotifier {
 
     _state = GemmaServiceState.generating;
     _tokensGenerated = 0;
+    _error = null;
     _generationStopwatch.reset();
     _generationStopwatch.start();
     notifyListeners();
@@ -166,14 +180,22 @@ class GemmaService extends ChangeNotifier {
   }
 
   /// Clear chat history and start fresh.
+  ///
+  /// Caller is responsible for stopping any in-flight generation first —
+  /// [InferenceChat.clearHistory] closes and re-creates the native session
+  /// and will race with an active [generateChatResponseAsync] loop.
   Future<void> clearChat() async {
     if (_chat != null) {
       await _chat!.clearHistory();
+      _tokensGenerated = 0;
+      _generationStopwatch.reset();
+      notifyListeners();
     }
   }
 
-  /// Get the preferred backend description for the current platform.
-  String get backendInfo => 'Gemma 4 E2B · GPU';
+  /// Get the model description. Backend is negotiated by flutter_gemma at
+  /// load time — we don't assert GPU here because a CPU fallback is possible.
+  String get backendInfo => 'Gemma 4 E2B';
 
   /// Tokens per second from the last generation.
   double get tokensPerSecond {

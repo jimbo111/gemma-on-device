@@ -80,27 +80,30 @@ class _ChatBubbleState extends State<ChatBubble>
       child: SlideTransition(
         position: _slideAnimation,
         child: Align(
-          alignment:
-              widget.isUser ? Alignment.centerRight : Alignment.centerLeft,
+          alignment: widget.isUser
+              ? AlignmentDirectional.centerEnd
+              : AlignmentDirectional.centerStart,
           child: Container(
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.78,
             ),
-            margin: EdgeInsets.only(
-              left: widget.isUser ? 48 : 0,
-              right: widget.isUser ? 0 : 48,
+            margin: EdgeInsetsDirectional.only(
+              start: widget.isUser ? 48 : 0,
+              end: widget.isUser ? 0 : 48,
               bottom: 8,
             ),
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: widget.isUser ? _kUserBubbleColor : _kAiBubbleColor,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(_kBubbleRadius),
-                topRight: const Radius.circular(_kBubbleRadius),
-                bottomLeft: Radius.circular(
+              // Directional so the "tail" (small corner) sits on the user's
+              // side in both LTR and RTL locales.
+              borderRadius: BorderRadiusDirectional.only(
+                topStart: const Radius.circular(_kBubbleRadius),
+                topEnd: const Radius.circular(_kBubbleRadius),
+                bottomStart: Radius.circular(
                     widget.isUser ? _kBubbleRadius : _kTailRadius),
-                bottomRight: Radius.circular(
+                bottomEnd: Radius.circular(
                     widget.isUser ? _kTailRadius : _kBubbleRadius),
               ),
               boxShadow: const [
