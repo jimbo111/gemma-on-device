@@ -29,6 +29,7 @@ class GemmaService extends ChangeNotifier {
   // Performance tracking
   int _tokensGenerated = 0;
   final Stopwatch _generationStopwatch = Stopwatch();
+  bool _lastGenerationTruncated = false;
 
   GemmaServiceState get state => _state;
   double get downloadProgress => _downloadProgress;
@@ -36,6 +37,11 @@ class GemmaService extends ChangeNotifier {
   bool get isReady => _state == GemmaServiceState.ready;
   bool get isGenerating => _state == GemmaServiceState.generating;
   int get tokensGenerated => _tokensGenerated;
+
+  /// True if the most recent generation hit [_maxGenerationTokens] before
+  /// the model emitted EOS. Consumers can surface a truncation hint to the
+  /// user. Reset at the start of each [sendMessage].
+  bool get wasLastGenerationTruncated => _lastGenerationTruncated;
 
   /// Initialize the FlutterGemma framework. Idempotent — safe to call from
   /// the setup flow so a failure surfaces through the normal retry path.
@@ -135,6 +141,7 @@ class GemmaService extends ChangeNotifier {
 
     _state = GemmaServiceState.generating;
     _tokensGenerated = 0;
+    _lastGenerationTruncated = false;
     _error = null;
     _generationStopwatch.reset();
     _generationStopwatch.start();
@@ -151,6 +158,7 @@ class GemmaService extends ChangeNotifier {
           // Enforce generation token limit to prevent thermal throttling
           if (_tokensGenerated >= _maxGenerationTokens) {
             await _chat!.stopGeneration();
+            _lastGenerationTruncated = true;
             yield response.token;
             break;
           }

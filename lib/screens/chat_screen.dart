@@ -79,9 +79,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _failGeneration(int aiMessageIndex) {
     if (!mounted) return;
+    final hadPartial = aiMessageIndex < _messages.length &&
+        _messages[aiMessageIndex].text.isNotEmpty;
     setState(() {
       _isGenerating = false;
-      if (aiMessageIndex < _messages.length) {
+      if (aiMessageIndex < _messages.length && !hadPartial) {
+        // No tokens streamed yet — replace empty placeholder with an
+        // inline error so the user sees a response. If a partial response
+        // exists, keep it and notify via SnackBar instead.
         _messages[aiMessageIndex] = const _ChatMessage(
           text: 'Something went wrong. Please try again.',
           isUser: false,
@@ -89,6 +94,13 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     widget.performanceMonitor.endSession();
+    if (hadPartial) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Generation interrupted. Partial response shown.'),
+        ),
+      );
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -101,8 +113,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(widget.performanceMonitor.statusDescription),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: _kSurfaceColor,
           ),
         );
       }
@@ -143,7 +153,19 @@ class _ChatScreenState extends State<ChatScreen> {
         },
         onDone: () {
           if (!mounted) return;
-          setState(() => _isGenerating = false);
+          final truncated =
+              widget.gemmaService.wasLastGenerationTruncated;
+          setState(() {
+            _isGenerating = false;
+            if (truncated && aiMessageIndex < _messages.length) {
+              final msg = _messages[aiMessageIndex];
+              _messages[aiMessageIndex] = _ChatMessage(
+                text: msg.text,
+                isUser: false,
+                wasTruncated: true,
+              );
+            }
+          });
           widget.performanceMonitor.endSession();
         },
         onError: (_) async {
@@ -207,31 +229,38 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: _messages.isEmpty
                   ? const _EmptyState()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      itemCount: _messages.length +
-                          (_isGenerating && _messages.last.text.isEmpty
-                              ? 1
-                              : 0),
-                      itemBuilder: (context, index) {
-                        if (index >= _messages.length) {
-                          return const TypingIndicator();
-                        }
-                        final msg = _messages[index];
-                        return ChatBubble(
-                          text: msg.text,
-                          isUser: msg.isUser,
-                          isStreaming: _isGenerating &&
+                  : SelectionArea(
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = _messages[index];
+                          // Show typing indicator in place of the empty AI
+                          // placeholder until the first token arrives — avoids
+                          // an empty bubble rendering alongside the indicator.
+                          final isAwaitingFirstToken = _isGenerating &&
                               index == _messages.length - 1 &&
-                              !msg.isUser,
-                        );
-                      },
+                              !msg.isUser &&
+                              msg.text.isEmpty;
+                          if (isAwaitingFirstToken) {
+                            return const TypingIndicator();
+                          }
+                          return ChatBubble(
+                            text: msg.text,
+                            isUser: msg.isUser,
+                            isStreaming: _isGenerating &&
+                                index == _messages.length - 1 &&
+                                !msg.isUser,
+                            wasTruncated: msg.wasTruncated,
+                          );
+                        },
+                      ),
                     ),
             ),
 
@@ -274,8 +303,10 @@ class _ChatScreenState extends State<ChatScreen> {
         IconButton(
           icon: Icon(
             Icons.delete_outline,
+            // 0.38 is the Material spec for disabled-on-dark; lower values
+            // fail WCAG AA contrast against true-black AppBar background.
             color: _messages.isEmpty
-                ? Colors.white.withValues(alpha: 0.25)
+                ? Colors.white.withValues(alpha: 0.38)
                 : Colors.white70,
           ),
           tooltip: 'Clear chat',
@@ -611,6 +642,11 @@ class _ActionButton extends StatelessWidget {
 class _ChatMessage {
   final String text;
   final bool isUser;
+  final bool wasTruncated;
 
-  const _ChatMessage({required this.text, required this.isUser});
+  const _ChatMessage({
+    required this.text,
+    required this.isUser,
+    this.wasTruncated = false,
+  });
 }

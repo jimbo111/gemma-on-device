@@ -33,6 +33,10 @@ class _SetupScreenState extends State<SetupScreen>
     with SingleTickerProviderStateMixin {
   String _statusMessage = 'Checking model...';
   bool _hasError = false;
+  // True while _startSetup is awaiting an async step. Without this, the
+  // gemmaService state lingers as `error` for a tick after a retry tap,
+  // and the spinner blinks off.
+  bool _isWorking = true;
 
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
@@ -82,11 +86,13 @@ class _SetupScreenState extends State<SetupScreen>
 
       // Done
       if (!mounted) return;
+      _isWorking = false;
       widget.onSetupComplete();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _hasError = true;
+        _isWorking = false;
         _statusMessage = 'Setup failed: $e';
       });
     }
@@ -95,6 +101,7 @@ class _SetupScreenState extends State<SetupScreen>
   Future<void> _retry() async {
     setState(() {
       _hasError = false;
+      _isWorking = true;
       _statusMessage = 'Retrying...';
     });
     await _startSetup();
@@ -122,6 +129,7 @@ class _SetupScreenState extends State<SetupScreen>
                     progress: widget.gemmaService.downloadProgress,
                     statusMessage: _statusMessage,
                     hasError: _hasError,
+                    isWorking: _isWorking,
                   );
                 },
               ),
@@ -224,18 +232,25 @@ class _ProgressSection extends StatelessWidget {
   final double progress;
   final String statusMessage;
   final bool hasError;
+  final bool isWorking;
 
   const _ProgressSection({
     required this.state,
     required this.progress,
     required this.statusMessage,
     required this.hasError,
+    required this.isWorking,
   });
 
   bool get _showDownloadCard => state == GemmaServiceState.downloading;
 
   bool get _showSpinner {
     if (hasError) return false;
+    if (_showDownloadCard) return false;
+    // Show a spinner whenever the screen is mid-setup, regardless of
+    // whether the service state has caught up. This bridges the gap on
+    // retry where state lingers as `error` for a tick.
+    if (isWorking) return true;
     // Explicitly list the "working, no progress bar yet" states so future
     // enum additions don't silently start showing a spinner.
     return state == GemmaServiceState.uninitialized ||
@@ -287,10 +302,10 @@ class _DownloadProgressCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clampedProgress = progress.clamp(0.0, 1.0);
-    final downloadedGb = clampedProgress * 2.58;
     final percentText = '${(clampedProgress * 100).toStringAsFixed(1)}%';
-    final sizeText =
-        '${downloadedGb.toStringAsFixed(2)} / 2.58 GB';
+    // flutter_gemma only exposes a 0-100 percentage — actual byte totals
+    // aren't available, so we don't fabricate a "X / Y GB" readout.
+    const sizeText = 'One-time download • ~2-3 GB';
 
     return Container(
       width: double.infinity,

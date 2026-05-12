@@ -13,17 +13,19 @@ const _kTailRadius = 4.0;
 /// streaming cursor. User messages slide in from the right; AI from the left.
 ///
 /// Public API is intentionally minimal so call sites need no changes:
-///   ChatBubble(text: ..., isUser: ..., isStreaming: ...)
+///   ChatBubble(text: ..., isUser: ..., isStreaming: ..., wasTruncated: ...)
 class ChatBubble extends StatefulWidget {
   final String text;
   final bool isUser;
   final bool isStreaming;
+  final bool wasTruncated;
 
   const ChatBubble({
     super.key,
     required this.text,
     required this.isUser,
     this.isStreaming = false,
+    this.wasTruncated = false,
   });
 
   @override
@@ -136,6 +138,42 @@ class _ChatBubbleState extends State<ChatBubble>
                   isUser: widget.isUser,
                   isStreaming: widget.isStreaming,
                 ),
+                if (widget.wasTruncated && !widget.isUser) ...[
+                  const SizedBox(height: 6),
+                  // Exclude the meta line from text selection so a long-press
+                  // copy gives just the message body.
+                  SelectionContainer.disabled(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 1),
+                          child: Icon(
+                            Icons.info_outline_rounded,
+                            size: 12,
+                            color: _kAiLabelColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        // Flexible so the meta line wraps inside the bubble's
+                        // max-width instead of overflowing under large system
+                        // font scales.
+                        Flexible(
+                          child: Text(
+                            'Response truncated at 512 tokens',
+                            style: const TextStyle(
+                              color: _kAiLabelColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.2,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
