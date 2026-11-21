@@ -1,15 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/gemma_service.dart';
-
-// Hardcoded design tokens — theme integration deferred.
-const _kBgColor = Color(0xFF000000);
-const _kCardColor = Color(0xFF181818);
-const _kAccent = Color(0xFF47A1E6);
-const _kSuccess = Color(0xFF5BC682);
-const _kError = Color(0xFFCD5454);
-const _kTextPrimary = Color(0xFFFFFFFF);
-const _kTextMuted = Color(0x80FFFFFF); // rgba(255,255,255,0.5)
+import '../theme/app_theme.dart';
 
 /// Onboarding screen that handles model download and initialization.
 ///
@@ -75,7 +67,10 @@ class _SetupScreenState extends State<SetupScreen>
       if (!installed) {
         // Step 2a: Download model (first launch)
         if (!mounted) return;
-        setState(() => _statusMessage = 'Downloading model...\nThis is a one-time setup.');
+        setState(
+          () => _statusMessage =
+              'Downloading model...\nThis is a one-time setup.',
+        );
         await widget.gemmaService.downloadModel();
       }
 
@@ -110,7 +105,7 @@ class _SetupScreenState extends State<SetupScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBgColor,
+      backgroundColor: AppTheme.background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -176,12 +171,15 @@ class _AppIconArea extends StatelessWidget {
         width: 100,
         height: 100,
         decoration: BoxDecoration(
-          color: _kCardColor,
+          color: AppTheme.surface,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: _kAccent.withValues(alpha: 0.25), width: 1.5),
+          border: Border.all(
+            color: AppTheme.accent.withValues(alpha: 0.25),
+            width: 1.5,
+          ),
           boxShadow: [
             BoxShadow(
-              color: _kAccent.withValues(alpha: 0.18),
+              color: AppTheme.accent.withValues(alpha: 0.18),
               blurRadius: 32,
               spreadRadius: 2,
             ),
@@ -190,7 +188,7 @@ class _AppIconArea extends StatelessWidget {
         child: const Icon(
           Icons.psychology_rounded,
           size: 52,
-          color: _kAccent,
+          color: AppTheme.accent,
         ),
       ),
     );
@@ -207,7 +205,7 @@ class _AppTitleBlock extends StatelessWidget {
         const Text(
           'On-Device AI',
           style: TextStyle(
-            color: _kTextPrimary,
+            color: AppTheme.textPrimary,
             fontSize: 30,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
@@ -217,7 +215,7 @@ class _AppTitleBlock extends StatelessWidget {
         const Text(
           'Powered by Gemma 4 E2B',
           style: TextStyle(
-            color: _kTextMuted,
+            color: AppTheme.textSecondary,
             fontSize: 15,
             fontWeight: FontWeight.w400,
           ),
@@ -272,7 +270,7 @@ class _ProgressSection extends StatelessWidget {
             height: 36,
             child: CircularProgressIndicator(
               strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(_kAccent),
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
             ),
           ),
           const SizedBox(height: 20),
@@ -283,7 +281,7 @@ class _ProgressSection extends StatelessWidget {
             statusMessage,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: hasError ? _kError : _kTextMuted,
+              color: hasError ? AppTheme.error : AppTheme.textSecondary,
               fontSize: 14,
               height: 1.5,
             ),
@@ -311,7 +309,7 @@ class _DownloadProgressCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: _kCardColor,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
@@ -323,7 +321,7 @@ class _DownloadProgressCard extends StatelessWidget {
               const Text(
                 'DOWNLOADING MODEL',
                 style: TextStyle(
-                  color: _kTextMuted,
+                  color: AppTheme.textSecondary,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 1.2,
@@ -332,7 +330,7 @@ class _DownloadProgressCard extends StatelessWidget {
               Text(
                 percentText,
                 style: const TextStyle(
-                  color: _kAccent,
+                  color: AppTheme.accent,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
@@ -347,18 +345,17 @@ class _DownloadProgressCard extends StatelessWidget {
               height: 8,
               child: LinearProgressIndicator(
                 value: clampedProgress,
-                backgroundColor: const Color(0xFF2A2A2A),
-                valueColor: const AlwaysStoppedAnimation<Color>(_kAccent),
+                backgroundColor: AppTheme.track,
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppTheme.accent,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 12),
           Text(
             sizeText,
-            style: const TextStyle(
-              color: _kTextMuted,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
         ],
       ),
@@ -378,8 +375,8 @@ class _RetryButton extends StatelessWidget {
       child: TextButton(
         onPressed: onRetry,
         style: TextButton.styleFrom(
-          backgroundColor: _kError,
-          foregroundColor: _kTextPrimary,
+          backgroundColor: AppTheme.error,
+          foregroundColor: AppTheme.textPrimary,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
@@ -407,7 +404,7 @@ class _OfflineInfoCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: _kCardColor,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -416,12 +413,12 @@ class _OfflineInfoCard extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: _kSuccess.withValues(alpha: 0.12),
+              color: AppTheme.success.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
               Icons.wifi_off_rounded,
-              color: _kSuccess,
+              color: AppTheme.success,
               size: 18,
             ),
           ),
@@ -430,7 +427,7 @@ class _OfflineInfoCard extends StatelessWidget {
             child: Text(
               '100% offline after setup\nNo internet connection required.',
               style: TextStyle(
-                color: _kTextMuted,
+                color: AppTheme.textSecondary,
                 fontSize: 13,
                 height: 1.5,
               ),

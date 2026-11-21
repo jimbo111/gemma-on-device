@@ -6,15 +6,7 @@ import '../services/gemma_service.dart';
 import '../services/performance_monitor.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/typing_indicator.dart';
-
-// Design token constants — will be replaced by ThemeData integration later.
-const _kBgColor = Color(0xFF000000);
-const _kSurfaceColor = Color(0xFF181818);
-const _kElevatedColor = Color(0xFF1E1E1E);
-const _kAccentColor = Color(0xFF47A1E6);
-const _kErrorColor = Color(0xFFCD5454);
-const _kPerfBarColor = Color(0xFF0C0C0C);
-const _kDisabledColor = Color(0xFF333333);
+import '../theme/app_theme.dart';
 
 /// Main chat interface for interacting with Gemma 4 E2B on-device.
 ///
@@ -79,7 +71,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _failGeneration(int aiMessageIndex) {
     if (!mounted) return;
-    final hadPartial = aiMessageIndex < _messages.length &&
+    final hadPartial =
+        aiMessageIndex < _messages.length &&
         _messages[aiMessageIndex].text.isNotEmpty;
     setState(() {
       _isGenerating = false;
@@ -111,9 +104,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (widget.performanceMonitor.shouldReduceLoad) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(widget.performanceMonitor.statusDescription),
-          ),
+          SnackBar(content: Text(widget.performanceMonitor.statusDescription)),
         );
       }
       return;
@@ -153,8 +144,7 @@ class _ChatScreenState extends State<ChatScreen> {
         },
         onDone: () {
           if (!mounted) return;
-          final truncated =
-              widget.gemmaService.wasLastGenerationTruncated;
+          final truncated = widget.gemmaService.wasLastGenerationTruncated;
           setState(() {
             _isGenerating = false;
             if (truncated && aiMessageIndex < _messages.length) {
@@ -217,7 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
-        backgroundColor: _kBgColor,
+        backgroundColor: AppTheme.background,
         appBar: _buildAppBar(),
         body: Column(
           children: [
@@ -244,7 +234,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           // Show typing indicator in place of the empty AI
                           // placeholder until the first token arrives — avoids
                           // an empty bubble rendering alongside the indicator.
-                          final isAwaitingFirstToken = _isGenerating &&
+                          final isAwaitingFirstToken =
+                              _isGenerating &&
                               index == _messages.length - 1 &&
                               !msg.isUser &&
                               msg.text.isEmpty;
@@ -254,7 +245,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           return ChatBubble(
                             text: msg.text,
                             isUser: msg.isUser,
-                            isStreaming: _isGenerating &&
+                            isStreaming:
+                                _isGenerating &&
                                 index == _messages.length - 1 &&
                                 !msg.isUser,
                             wasTruncated: msg.wasTruncated,
@@ -285,7 +277,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   AppBar _buildAppBar() {
     return AppBar(
-      backgroundColor: _kBgColor,
+      backgroundColor: AppTheme.background,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -342,14 +334,14 @@ class _PerformanceBar extends StatelessWidget {
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-          color: _kPerfBarColor,
+          color: AppTheme.surfaceSunken,
           child: Row(
             children: [
               // Offline pill
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: _kAccentColor.withValues(alpha: 0.15),
+                  color: AppTheme.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
@@ -359,7 +351,7 @@ class _PerformanceBar extends StatelessWidget {
                       width: 5,
                       height: 5,
                       decoration: const BoxDecoration(
-                        color: _kAccentColor,
+                        color: AppTheme.accent,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -367,7 +359,7 @@ class _PerformanceBar extends StatelessWidget {
                     const Text(
                       'OFFLINE',
                       style: TextStyle(
-                        color: _kAccentColor,
+                        color: AppTheme.accent,
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.5,
@@ -381,10 +373,7 @@ class _PerformanceBar extends StatelessWidget {
               // Backend info
               Text(
                 gemmaService.backendInfo,
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
 
               const Spacer(),
@@ -393,10 +382,7 @@ class _PerformanceBar extends StatelessWidget {
               if (isGenerating && tps > 0) ...[
                 Text(
                   '${tps.toStringAsFixed(1)} tok/s',
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -406,13 +392,13 @@ class _PerformanceBar extends StatelessWidget {
                 const Icon(
                   Icons.pause_circle_outline,
                   size: 13,
-                  color: _kErrorColor,
+                  color: AppTheme.error,
                 ),
                 const SizedBox(width: 3),
                 const Text(
                   'COOLDOWN',
                   style: TextStyle(
-                    color: _kErrorColor,
+                    color: AppTheme.error,
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.4,
@@ -444,7 +430,7 @@ class _EmptyState extends StatelessWidget {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: _kSurfaceColor,
+              color: AppTheme.surface,
               shape: BoxShape.circle,
             ),
             child: const Icon(
@@ -466,10 +452,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 8),
           const Text(
             'Running Gemma 4 E2B locally on your device',
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: Colors.white38, fontSize: 13),
           ),
         ],
       ),
@@ -505,14 +488,14 @@ class _InputBar extends StatelessWidget {
 
     return Container(
       padding: EdgeInsets.fromLTRB(12, 10, 12, 10 + bottomPadding),
-      color: _kSurfaceColor,
+      color: AppTheme.surface,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: _kElevatedColor,
+                color: AppTheme.surfaceElevated,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: TextField(
@@ -527,11 +510,8 @@ class _InputBar extends StatelessWidget {
                 onSubmitted: (_) {
                   if (canSend) onSend();
                 },
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                ),
-                cursorColor: _kAccentColor,
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                cursorColor: AppTheme.accent,
                 decoration: InputDecoration(
                   hintText: 'Message...',
                   hintStyle: const TextStyle(
@@ -554,7 +534,7 @@ class _InputBar extends StatelessWidget {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                     borderSide: const BorderSide(
-                      color: _kAccentColor,
+                      color: AppTheme.accent,
                       width: 1.5,
                     ),
                   ),
@@ -568,7 +548,7 @@ class _InputBar extends StatelessWidget {
           if (isGenerating)
             _ActionButton(
               onPressed: onStop,
-              backgroundColor: _kErrorColor,
+              backgroundColor: AppTheme.error,
               child: const Icon(
                 Icons.stop_rounded,
                 color: Colors.white,
@@ -583,8 +563,9 @@ class _InputBar extends StatelessWidget {
                 final enabled = hasText && !isThrottled;
                 return _ActionButton(
                   onPressed: enabled ? onSend : null,
-                  backgroundColor:
-                      enabled ? _kAccentColor : _kDisabledColor,
+                  backgroundColor: enabled
+                      ? AppTheme.accent
+                      : AppTheme.disabled,
                   child: Icon(
                     Icons.arrow_upward_rounded,
                     color: enabled ? Colors.white : Colors.white30,
@@ -618,10 +599,7 @@ class _ActionButton extends StatelessWidget {
       curve: Curves.easeInOut,
       width: 44,
       height: 44,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: backgroundColor, shape: BoxShape.circle),
       child: Material(
         color: Colors.transparent,
         shape: const CircleBorder(),

@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
-
-// ─── Design tokens (hardcoded until theme agent ships) ───────────────────────
-const _kAiBubbleColor = Color(0xFF181818);
-const _kDotColor = Color(0xFF47A1E6);
-const _kBubbleRadius = 20.0;
-const _kTailRadius = 4.0;
+import '../theme/app_theme.dart';
 
 /// Three-dot typing indicator styled to match the AI bubble.
 ///
@@ -72,12 +67,12 @@ class _TypingIndicatorState extends State<TypingIndicator>
         margin: const EdgeInsetsDirectional.only(end: 48, bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: const BoxDecoration(
-          color: _kAiBubbleColor,
+          color: AppTheme.surface,
           borderRadius: BorderRadiusDirectional.only(
-            topStart: Radius.circular(_kBubbleRadius),
-            topEnd: Radius.circular(_kBubbleRadius),
-            bottomStart: Radius.circular(_kTailRadius),
-            bottomEnd: Radius.circular(_kBubbleRadius),
+            topStart: Radius.circular(AppTheme.radiusBubble),
+            topEnd: Radius.circular(AppTheme.radiusBubble),
+            bottomStart: Radius.circular(AppTheme.radiusBubbleTail),
+            bottomEnd: Radius.circular(AppTheme.radiusBubble),
           ),
           boxShadow: [
             BoxShadow(
@@ -135,7 +130,7 @@ class _AnimatedDot extends StatelessWidget {
             width: 8,
             height: 8,
             decoration: const BoxDecoration(
-              color: _kDotColor,
+              color: AppTheme.accent,
               shape: BoxShape.circle,
             ),
           ),

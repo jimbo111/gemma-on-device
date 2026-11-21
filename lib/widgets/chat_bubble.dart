@@ -1,13 +1,5 @@
 import 'package:flutter/material.dart';
-
-// ─── Design tokens (hardcoded until theme agent ships) ───────────────────────
-const _kUserBubbleColor = Color(0xFF47A1E6);
-const _kAiBubbleColor = Color(0xFF181818);
-const _kUserTextColor = Color(0xFFFFFFFF);
-const _kAiTextColor = Color(0xE6FFFFFF); // rgba(255,255,255,0.9)
-const _kAiLabelColor = Color(0xFF47A1E6);
-const _kBubbleRadius = 20.0;
-const _kTailRadius = 4.0;
+import '../theme/app_theme.dart';
 
 /// A chat message bubble with a slide-in entrance animation and optional
 /// streaming cursor. User messages slide in from the right; AI from the left.
@@ -48,15 +40,17 @@ class _ChatBubbleState extends State<ChatBubble>
     );
 
     // User slides from right (+x), AI slides from left (-x).
-    final beginOffset =
-        widget.isUser ? const Offset(0.18, 0) : const Offset(-0.18, 0);
+    final beginOffset = widget.isUser
+        ? const Offset(0.18, 0)
+        : const Offset(-0.18, 0);
 
-    _slideAnimation = Tween<Offset>(
-      begin: beginOffset,
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(parent: _entranceController, curve: Curves.easeOutCubic),
-    );
+    _slideAnimation = Tween<Offset>(begin: beginOffset, end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
@@ -94,19 +88,24 @@ class _ChatBubbleState extends State<ChatBubble>
               end: widget.isUser ? 0 : 48,
               bottom: 8,
             ),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: widget.isUser ? _kUserBubbleColor : _kAiBubbleColor,
+              color: widget.isUser ? AppTheme.accent : AppTheme.surface,
               // Directional so the "tail" (small corner) sits on the user's
               // side in both LTR and RTL locales.
               borderRadius: BorderRadiusDirectional.only(
-                topStart: const Radius.circular(_kBubbleRadius),
-                topEnd: const Radius.circular(_kBubbleRadius),
+                topStart: const Radius.circular(AppTheme.radiusBubble),
+                topEnd: const Radius.circular(AppTheme.radiusBubble),
                 bottomStart: Radius.circular(
-                    widget.isUser ? _kBubbleRadius : _kTailRadius),
+                  widget.isUser
+                      ? AppTheme.radiusBubble
+                      : AppTheme.radiusBubbleTail,
+                ),
                 bottomEnd: Radius.circular(
-                    widget.isUser ? _kTailRadius : _kBubbleRadius),
+                  widget.isUser
+                      ? AppTheme.radiusBubbleTail
+                      : AppTheme.radiusBubble,
+                ),
               ),
               boxShadow: const [
                 BoxShadow(
@@ -126,7 +125,7 @@ class _ChatBubbleState extends State<ChatBubble>
                     child: Text(
                       'Gemma',
                       style: const TextStyle(
-                        color: _kAiLabelColor,
+                        color: AppTheme.accent,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
@@ -151,7 +150,7 @@ class _ChatBubbleState extends State<ChatBubble>
                           child: Icon(
                             Icons.info_outline_rounded,
                             size: 12,
-                            color: _kAiLabelColor,
+                            color: AppTheme.accent,
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -162,7 +161,7 @@ class _ChatBubbleState extends State<ChatBubble>
                           child: Text(
                             'Response truncated at 512 tokens',
                             style: const TextStyle(
-                              color: _kAiLabelColor,
+                              color: AppTheme.accent,
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                               letterSpacing: 0.2,
@@ -236,17 +235,12 @@ class _BubbleTextState extends State<_BubbleText>
 
   @override
   Widget build(BuildContext context) {
-    final baseColor =
-        widget.isUser ? _kUserTextColor : _kAiTextColor;
+    final baseColor = widget.isUser ? AppTheme.textPrimary : AppTheme.textBody;
 
     if (!widget.isStreaming) {
       return Text(
         widget.text,
-        style: TextStyle(
-          color: baseColor,
-          fontSize: 15,
-          height: 1.45,
-        ),
+        style: TextStyle(color: baseColor, fontSize: 15, height: 1.45),
       );
     }
 
@@ -256,21 +250,16 @@ class _BubbleTextState extends State<_BubbleText>
       animation: _cursorController,
       builder: (context, _) {
         // Ease in/out so the blink feels smooth, not mechanical.
-        final opacity =
-            Curves.easeInOut.transform(_cursorController.value);
+        final opacity = Curves.easeInOut.transform(_cursorController.value);
         return RichText(
           text: TextSpan(
-            style: TextStyle(
-              color: baseColor,
-              fontSize: 15,
-              height: 1.45,
-            ),
+            style: TextStyle(color: baseColor, fontSize: 15, height: 1.45),
             children: [
               TextSpan(text: widget.text),
               TextSpan(
                 text: ' |',
                 style: TextStyle(
-                  color: _kAiLabelColor.withValues(alpha: opacity),
+                  color: AppTheme.accent.withValues(alpha: opacity),
                   fontWeight: FontWeight.w300,
                 ),
               ),

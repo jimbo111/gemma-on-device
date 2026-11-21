@@ -1,63 +1,44 @@
 import 'package:flutter/material.dart';
 
-/// Central theme definition for On-Device AI.
-///
-/// This app is dark-only. All color values are sourced from the React Native
-/// design reference so the two implementations stay visually in sync.
+/// Design tokens and [ThemeData] for the app. Dark-only.
 abstract final class AppTheme {
-  // ---------------------------------------------------------------------------
-  // Color constants — reference these directly in widgets for one-off overrides
-  // ---------------------------------------------------------------------------
-
-  /// True black scaffold / page background.
   static const Color background = Color(0xFF000000);
 
-  /// Default card / list-item surface.
+  /// Status strip under the app bar.
+  static const Color surfaceSunken = Color(0xFF0C0C0C);
+
+  /// Cards, input bar, AI chat bubble.
   static const Color surface = Color(0xFF181818);
 
-  /// Elevated dialogs, bottom sheets, input fields.
+  /// Text field fill.
   static const Color surfaceElevated = Color(0xFF1E1E1E);
 
-  /// Primary accent — also used as the user chat bubble background.
+  /// Progress track.
+  static const Color track = Color(0xFF2A2A2A);
+
+  /// Disabled button fill.
+  static const Color disabled = Color(0xFF333333);
+
+  /// Primary accent; also the user chat bubble.
   static const Color accent = Color(0xFF47A1E6);
 
-  /// AI response chat bubble background.
-  static const Color bubble = Color(0xFF181818);
-
-  /// User chat bubble background (alias for [accent]).
-  static const Color userBubble = accent;
-
-  /// Positive / success state.
   static const Color success = Color(0xFF5BC682);
-
-  /// Error / destructive state.
   static const Color error = Color(0xFFCD5454);
 
-  /// Full-opacity body text.
   static const Color textPrimary = Color(0xFFFFFFFF);
 
-  /// 50 % opacity secondary / hint text  (rgba 255,255,255,0.5).
+  /// AI message body text (90% white).
+  static const Color textBody = Color(0xE6FFFFFF);
+
+  /// Secondary / hint text (50% white).
   static const Color textSecondary = Color(0x80FFFFFF);
 
-  /// Subtle shadow color  (rgba 0,0,0,0.08).
-  static const Color shadow = Color(0x14000000);
-
-  // ---------------------------------------------------------------------------
-  // Shared shape geometry
-  // ---------------------------------------------------------------------------
-
-  /// Default corner radius for cards and bottom sheets (24 dp).
   static const double radiusDefault = 24.0;
-
-  /// Larger corner radius for prominent containers (32 dp).
-  static const double radiusLarge = 32.0;
-
-  /// Small corner radius for chips, badges (12 dp).
   static const double radiusSmall = 12.0;
 
-  // ---------------------------------------------------------------------------
-  // ThemeData
-  // ---------------------------------------------------------------------------
+  /// Chat bubble corners; the tail corner sits on the sender's side.
+  static const double radiusBubble = 20.0;
+  static const double radiusBubbleTail = 4.0;
 
   static ThemeData get darkTheme {
     // Build an explicit ColorScheme rather than using fromSeed so that every
@@ -65,7 +46,6 @@ abstract final class AppTheme {
     const colorScheme = ColorScheme(
       brightness: Brightness.dark,
 
-      // Brand colors
       primary: accent,
       onPrimary: textPrimary,
       primaryContainer: surfaceElevated,
@@ -81,35 +61,25 @@ abstract final class AppTheme {
       tertiaryContainer: surface,
       onTertiaryContainer: textPrimary,
 
-      // Error
       error: error,
       onError: textPrimary,
       errorContainer: Color(0xFF3B1A1A),
       onErrorContainer: error,
 
-      // Backgrounds and surfaces
-      // surface → used by Card, Dialog, BottomSheet, etc.
       surface: surface,
       onSurface: textPrimary,
-      // surfaceContainerHigh → used by ChatBubble for AI messages
       surfaceContainerHighest: surfaceElevated,
-      surfaceContainerHigh: bubble,
+      surfaceContainerHigh: surface,
       surfaceContainer: surface,
       surfaceContainerLow: surface,
       surfaceContainerLowest: background,
       surfaceDim: background,
       surfaceBright: surfaceElevated,
 
-      // Scheme background (deprecated slot, kept for back-compat widgets)
-      // ignore: deprecated_member_use
-      background: background,
-      // ignore: deprecated_member_use
-      onBackground: textPrimary,
-
       outline: Color(0xFF2C2C2C),
       outlineVariant: Color(0xFF1F1F1F),
 
-      shadow: shadow,
+      shadow: Color(0x14000000),
       scrim: Color(0xFF000000),
 
       inverseSurface: textPrimary,
@@ -122,10 +92,8 @@ abstract final class AppTheme {
       brightness: Brightness.dark,
       colorScheme: colorScheme,
 
-      // Scaffold
       scaffoldBackgroundColor: background,
 
-      // AppBar
       appBarTheme: const AppBarTheme(
         backgroundColor: background,
         foregroundColor: textPrimary,
@@ -141,52 +109,6 @@ abstract final class AppTheme {
         iconTheme: IconThemeData(color: textPrimary),
       ),
 
-      // Cards
-      cardTheme: CardThemeData(
-        color: surface,
-        elevation: 0,
-        shadowColor: shadow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(radiusDefault)),
-        ),
-        margin: EdgeInsets.zero,
-      ),
-
-      // Dialogs
-      dialogTheme: DialogThemeData(
-        backgroundColor: surfaceElevated,
-        elevation: 8,
-        shadowColor: shadow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(radiusLarge)),
-        ),
-        titleTextStyle: const TextStyle(
-          color: textPrimary,
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
-        ),
-        contentTextStyle: const TextStyle(
-          color: textSecondary,
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          height: 1.5,
-        ),
-      ),
-
-      // Bottom sheet
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: surfaceElevated,
-        modalBackgroundColor: surfaceElevated,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(radiusLarge),
-          ),
-        ),
-      ),
-
-      // Input / text fields
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surfaceElevated,
@@ -221,56 +143,16 @@ abstract final class AppTheme {
         ),
       ),
 
-      // Elevated button
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: accent,
-          foregroundColor: textPrimary,
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(radiusDefault)),
-          ),
-        ),
-      ),
-
-      // Text button
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: accent,
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(radiusSmall)),
           ),
         ),
       ),
 
-      // Outlined button
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: accent,
-          side: const BorderSide(color: accent, width: 1.5),
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(radiusDefault)),
-          ),
-        ),
-      ),
-
-      // Icon button
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
           foregroundColor: textPrimary,
@@ -278,46 +160,12 @@ abstract final class AppTheme {
         ),
       ),
 
-      // List tiles
-      listTileTheme: const ListTileThemeData(
-        tileColor: Colors.transparent,
-        textColor: textPrimary,
-        iconColor: textSecondary,
-        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      ),
-
-      // Divider
-      dividerTheme: const DividerThemeData(
-        color: Color(0xFF1F1F1F),
-        thickness: 1,
-        space: 1,
-      ),
-
-      // Progress indicator
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: accent,
         linearTrackColor: surface,
         circularTrackColor: surface,
       ),
 
-      // Chip
-      chipTheme: ChipThemeData(
-        backgroundColor: surface,
-        selectedColor: accent,
-        disabledColor: surface,
-        labelStyle: const TextStyle(
-          color: textPrimary,
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-        ),
-        side: BorderSide.none,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(radiusSmall)),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      ),
-
-      // Snack bar
       snackBarTheme: SnackBarThemeData(
         backgroundColor: surfaceElevated,
         contentTextStyle: const TextStyle(
@@ -333,19 +181,6 @@ abstract final class AppTheme {
         ),
       ),
 
-      // Switch
-      switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) {
-          return states.contains(WidgetState.selected) ? accent : textSecondary;
-        }),
-        trackColor: WidgetStateProperty.resolveWith((states) {
-          return states.contains(WidgetState.selected)
-              ? accent.withValues(alpha: 0.3)
-              : surface;
-        }),
-      ),
-
-      // Typography — system font with bold weighting emphasis
       textTheme: const TextTheme(
         displayLarge: TextStyle(
           color: textPrimary,
