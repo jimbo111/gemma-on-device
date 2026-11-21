@@ -1,16 +1,11 @@
 import 'package:flutter/material.dart';
 
-// ─── Design tokens (hardcoded until theme agent ships) ───────────────────────
-const _kAiBubbleColor = Color(0xFF181818);
-const _kDotColor = Color(0xFF47A1E6);
-const _kBubbleRadius = 20.0;
-const _kTailRadius = 4.0;
+import '../theme/app_theme.dart';
 
 /// Three-dot typing indicator styled to match the AI bubble.
 ///
-/// Each dot pulses with a staggered, spring-like ease so the animation reads
-/// as a wave rather than a simultaneous flash. A single [AnimationController]
-/// drives all three dots via [Interval]-bounded [CurvedAnimation]s.
+/// One controller drives all three dots through staggered [Interval]s so the
+/// pulse reads as a wave.
 class TypingIndicator extends StatefulWidget {
   const TypingIndicator({super.key});
 
@@ -22,15 +17,12 @@ class _TypingIndicatorState extends State<TypingIndicator>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  // Each dot gets its own animation occupying a staggered window of the
-  // total cycle. Using Curves.easeInOut inside each Interval produces the
-  // spring-like feel without requiring external physics libraries.
   static const _dotCount = 3;
 
-  // How much of the 1.0 cycle each dot's active window spans.
+  /// Fraction of the cycle each dot's pulse spans.
   static const _windowSize = 0.45;
 
-  // Gap between consecutive dot start points.
+  /// Offset between consecutive dots' pulse start.
   static const _stepSize = 0.22;
 
   late final List<Animation<double>> _dotAnimations;
@@ -41,8 +33,6 @@ class _TypingIndicatorState extends State<TypingIndicator>
 
     _controller = AnimationController(
       vsync: this,
-      // Total cycle long enough that the last dot finishes with a comfortable
-      // pause before the wave loops.
       duration: const Duration(milliseconds: 1400),
     )..repeat();
 
@@ -72,20 +62,13 @@ class _TypingIndicatorState extends State<TypingIndicator>
         margin: const EdgeInsetsDirectional.only(end: 48, bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: const BoxDecoration(
-          color: _kAiBubbleColor,
+          color: AppTheme.surface,
           borderRadius: BorderRadiusDirectional.only(
-            topStart: Radius.circular(_kBubbleRadius),
-            topEnd: Radius.circular(_kBubbleRadius),
-            bottomStart: Radius.circular(_kTailRadius),
-            bottomEnd: Radius.circular(_kBubbleRadius),
+            topStart: Radius.circular(AppTheme.radiusBubble),
+            topEnd: Radius.circular(AppTheme.radiusBubble),
+            bottomStart: Radius.circular(AppTheme.radiusBubbleTail),
+            bottomEnd: Radius.circular(AppTheme.radiusBubble),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Color(0x14000000), // rgba(0,0,0,0.08)
-              blurRadius: 10,
-              offset: Offset(0, 5),
-            ),
-          ],
         ),
         child: AnimatedBuilder(
           animation: _controller,
@@ -106,11 +89,7 @@ class _TypingIndicatorState extends State<TypingIndicator>
   }
 }
 
-// ─── Single animated dot ─────────────────────────────────────────────────────
-
-/// A single dot that scales and fades based on [animation] value [0..1].
-/// Scale and opacity are driven by the same curve so the dot "pops" upward
-/// and fades simultaneously, giving a pulse rather than a flat blink.
+/// A dot that grows and brightens as [animation] goes from 0 to 1.
 class _AnimatedDot extends StatelessWidget {
   final Animation<double> animation;
   final bool isLast;
@@ -119,10 +98,8 @@ class _AnimatedDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Map animation value → scale: rest at 0.7, peak at 1.0.
     final scale = 0.7 + (animation.value * 0.3);
 
-    // Map animation value → opacity: min 0.35, max 1.0.
     final opacity = (0.35 + animation.value * 0.65).clamp(0.0, 1.0);
 
     return Padding(
@@ -135,7 +112,7 @@ class _AnimatedDot extends StatelessWidget {
             width: 8,
             height: 8,
             decoration: const BoxDecoration(
-              color: _kDotColor,
+              color: AppTheme.accent,
               shape: BoxShape.circle,
             ),
           ),

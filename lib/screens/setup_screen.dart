@@ -1,20 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../services/gemma_service.dart';
+import '../theme/app_theme.dart';
 
-// Hardcoded design tokens — theme integration deferred.
-const _kBgColor = Color(0xFF000000);
-const _kCardColor = Color(0xFF181818);
-const _kAccent = Color(0xFF47A1E6);
-const _kSuccess = Color(0xFF5BC682);
-const _kError = Color(0xFFCD5454);
-const _kTextPrimary = Color(0xFFFFFFFF);
-const _kTextMuted = Color(0x80FFFFFF); // rgba(255,255,255,0.5)
-
-/// Onboarding screen that handles model download and initialization.
-///
-/// Shows download progress for the 2.58 GB Gemma 4 E2B model on first launch.
-/// On subsequent launches, skips straight to model loading (GPU warm-up).
+/// Downloads the 2.6 GB model on first launch, then loads it. Later launches
+/// skip straight to loading.
 class SetupScreen extends StatefulWidget {
   final GemmaService gemmaService;
   final VoidCallback onSetupComplete;
@@ -29,13 +19,16 @@ class SetupScreen extends StatefulWidget {
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
+const _downloadMessage =
+    'Downloading model. This is a one-time setup.\n'
+    'Allow notifications so it keeps going if you leave the app.';
+
 class _SetupScreenState extends State<SetupScreen>
     with SingleTickerProviderStateMixin {
   String _statusMessage = 'Checking model...';
   bool _hasError = false;
-  // True while _startSetup is awaiting an async step. Without this, the
-  // gemmaService state lingers as `error` for a tick after a retry tap,
-  // and the spinner blinks off.
+  // True while _startSetup is running. The service state lingers as `error`
+  // for a tick after a retry tap; this keeps the spinner from blinking off.
   bool _isWorking = true;
 
   late final AnimationController _pulseController;
@@ -64,27 +57,18 @@ class _SetupScreenState extends State<SetupScreen>
   }
 
   Future<void> _startSetup() async {
+    final service = widget.gemmaService;
     try {
-      // Step 0: Framework init (idempotent). Done here so failures surface
-      // through this retry flow rather than crashing at app launch.
-      await widget.gemmaService.initFramework();
+      // Initialized here rather than in main() so a failure lands on the
+      // retry UI instead of a black screen.
+      await service.initFramework();
 
-      // Step 1: Check if model is already installed
-      final installed = await widget.gemmaService.isModelInstalled();
+      await service.installModel();
 
-      if (!installed) {
-        // Step 2a: Download model (first launch)
-        if (!mounted) return;
-        setState(() => _statusMessage = 'Downloading model...\nThis is a one-time setup.');
-        await widget.gemmaService.downloadModel();
-      }
-
-      // Step 3: Load model into GPU memory
       if (!mounted) return;
-      setState(() => _statusMessage = 'Loading model to GPU...');
-      await widget.gemmaService.loadModel();
+      setState(() => _statusMessage = 'Loading model...');
+      await service.loadModel();
 
-      // Done
       if (!mounted) return;
       _isWorking = false;
       widget.onSetupComplete();
@@ -110,7 +94,7 @@ class _SetupScreenState extends State<SetupScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBgColor,
+      backgroundColor: AppTheme.background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -127,7 +111,11 @@ class _SetupScreenState extends State<SetupScreen>
                   return _ProgressSection(
                     state: widget.gemmaService.state,
                     progress: widget.gemmaService.downloadProgress,
-                    statusMessage: _statusMessage,
+                    statusMessage:
+                        widget.gemmaService.state ==
+                            GemmaServiceState.downloading
+                        ? _downloadMessage
+                        : _statusMessage,
                     hasError: _hasError,
                     isWorking: _isWorking,
                   );
@@ -159,10 +147,6 @@ class _SetupScreenState extends State<SetupScreen>
   }
 }
 
-// ---------------------------------------------------------------------------
-// Sub-widgets
-// ---------------------------------------------------------------------------
-
 class _AppIconArea extends StatelessWidget {
   final Animation<double> pulseAnimation;
 
@@ -176,12 +160,15 @@ class _AppIconArea extends StatelessWidget {
         width: 100,
         height: 100,
         decoration: BoxDecoration(
-          color: _kCardColor,
+          color: AppTheme.surface,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: _kAccent.withValues(alpha: 0.25), width: 1.5),
+          border: Border.all(
+            color: AppTheme.accent.withValues(alpha: 0.25),
+            width: 1.5,
+          ),
           boxShadow: [
             BoxShadow(
-              color: _kAccent.withValues(alpha: 0.18),
+              color: AppTheme.accent.withValues(alpha: 0.18),
               blurRadius: 32,
               spreadRadius: 2,
             ),
@@ -190,7 +177,7 @@ class _AppIconArea extends StatelessWidget {
         child: const Icon(
           Icons.psychology_rounded,
           size: 52,
-          color: _kAccent,
+          color: AppTheme.accent,
         ),
       ),
     );
@@ -207,7 +194,7 @@ class _AppTitleBlock extends StatelessWidget {
         const Text(
           'On-Device AI',
           style: TextStyle(
-            color: _kTextPrimary,
+            color: AppTheme.textPrimary,
             fontSize: 30,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
@@ -217,7 +204,7 @@ class _AppTitleBlock extends StatelessWidget {
         const Text(
           'Powered by Gemma 4 E2B',
           style: TextStyle(
-            color: _kTextMuted,
+            color: AppTheme.textSecondary,
             fontSize: 15,
             fontWeight: FontWeight.w400,
           ),
@@ -247,12 +234,8 @@ class _ProgressSection extends StatelessWidget {
   bool get _showSpinner {
     if (hasError) return false;
     if (_showDownloadCard) return false;
-    // Show a spinner whenever the screen is mid-setup, regardless of
-    // whether the service state has caught up. This bridges the gap on
-    // retry where state lingers as `error` for a tick.
     if (isWorking) return true;
-    // Explicitly list the "working, no progress bar yet" states so future
-    // enum additions don't silently start showing a spinner.
+    // Listed explicitly so new enum values don't start showing a spinner.
     return state == GemmaServiceState.uninitialized ||
         state == GemmaServiceState.downloaded ||
         state == GemmaServiceState.loading;
@@ -272,7 +255,7 @@ class _ProgressSection extends StatelessWidget {
             height: 36,
             child: CircularProgressIndicator(
               strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(_kAccent),
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
             ),
           ),
           const SizedBox(height: 20),
@@ -283,7 +266,7 @@ class _ProgressSection extends StatelessWidget {
             statusMessage,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: hasError ? _kError : _kTextMuted,
+              color: hasError ? AppTheme.error : AppTheme.textSecondary,
               fontSize: 14,
               height: 1.5,
             ),
@@ -303,15 +286,14 @@ class _DownloadProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final clampedProgress = progress.clamp(0.0, 1.0);
     final percentText = '${(clampedProgress * 100).toStringAsFixed(1)}%';
-    // flutter_gemma only exposes a 0-100 percentage — actual byte totals
-    // aren't available, so we don't fabricate a "X / Y GB" readout.
-    const sizeText = 'One-time download • ~2-3 GB';
+    // flutter_gemma reports only a percentage, not bytes.
+    const sizeText = 'One-time download · 2.6 GB';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: _kCardColor,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
@@ -323,7 +305,7 @@ class _DownloadProgressCard extends StatelessWidget {
               const Text(
                 'DOWNLOADING MODEL',
                 style: TextStyle(
-                  color: _kTextMuted,
+                  color: AppTheme.textSecondary,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 1.2,
@@ -332,7 +314,7 @@ class _DownloadProgressCard extends StatelessWidget {
               Text(
                 percentText,
                 style: const TextStyle(
-                  color: _kAccent,
+                  color: AppTheme.accent,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
@@ -340,25 +322,23 @@ class _DownloadProgressCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // Custom progress track
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: SizedBox(
               height: 8,
               child: LinearProgressIndicator(
                 value: clampedProgress,
-                backgroundColor: const Color(0xFF2A2A2A),
-                valueColor: const AlwaysStoppedAnimation<Color>(_kAccent),
+                backgroundColor: AppTheme.track,
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppTheme.accent,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 12),
           Text(
             sizeText,
-            style: const TextStyle(
-              color: _kTextMuted,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
         ],
       ),
@@ -378,8 +358,8 @@ class _RetryButton extends StatelessWidget {
       child: TextButton(
         onPressed: onRetry,
         style: TextButton.styleFrom(
-          backgroundColor: _kError,
-          foregroundColor: _kTextPrimary,
+          backgroundColor: AppTheme.error,
+          foregroundColor: AppTheme.textPrimary,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
@@ -407,7 +387,7 @@ class _OfflineInfoCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: _kCardColor,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -416,12 +396,12 @@ class _OfflineInfoCard extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: _kSuccess.withValues(alpha: 0.12),
+              color: AppTheme.success.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
               Icons.wifi_off_rounded,
-              color: _kSuccess,
+              color: AppTheme.success,
               size: 18,
             ),
           ),
@@ -430,7 +410,7 @@ class _OfflineInfoCard extends StatelessWidget {
             child: Text(
               '100% offline after setup\nNo internet connection required.',
               style: TextStyle(
-                color: _kTextMuted,
+                color: AppTheme.textSecondary,
                 fontSize: 13,
                 height: 1.5,
               ),

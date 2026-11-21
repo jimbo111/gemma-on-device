@@ -1,28 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/gemma_service.dart';
 import '../services/performance_monitor.dart';
+import '../theme/app_theme.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/typing_indicator.dart';
 
-// Design token constants — will be replaced by ThemeData integration later.
-const _kBgColor = Color(0xFF000000);
-const _kSurfaceColor = Color(0xFF181818);
-const _kElevatedColor = Color(0xFF1E1E1E);
-const _kAccentColor = Color(0xFF47A1E6);
-const _kErrorColor = Color(0xFFCD5454);
-const _kPerfBarColor = Color(0xFF0C0C0C);
-const _kDisabledColor = Color(0xFF333333);
-
-/// Main chat interface for interacting with Gemma 4 E2B on-device.
-///
-/// Features:
-/// - Streaming token-by-token responses
-/// - Performance status bar (thermal state, tokens/sec)
-/// - Stop generation button
-/// - Clear chat
+/// Streaming chat with the on-device model.
 class ChatScreen extends StatefulWidget {
   final GemmaService gemmaService;
   final PerformanceMonitor performanceMonitor;
@@ -38,27 +25,50 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  /// Within this many logical pixels of the end, new text keeps the view
+  /// pinned to the bottom; further up, the user's scroll position wins.
+  static const double _autoScrollThreshold = 64.0;
+
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
 
   final List<_ChatMessage> _messages = [];
-  bool _isGenerating = false;
+
+  /// The reply being streamed, kept out of [_messages] so each chunk rebuilds
+  /// one bubble instead of the whole screen. Null when idle.
+  final ValueNotifier<String?> _streamingReply = ValueNotifier(null);
+  final StringBuffer _replyBuffer = StringBuffer();
   StreamSubscription<String>? _generationSub;
+  _ChatMessage? _activeUserMessage;
+  bool _clearing = false;
+  bool _scrollScheduled = false;
+
+  bool get _isGenerating => _generationSub != null;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.performanceMonitor.addListener(_onThrottleChanged);
+  }
 
   @override
   void dispose() {
+    widget.performanceMonitor.removeListener(_onThrottleChanged);
+    _generationSub?.cancel();
+    widget.performanceMonitor.endSession();
     _textController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
-    _generationSub?.cancel();
+    _streamingReply.dispose();
     super.dispose();
   }
 
-  /// Threshold (in logical pixels) within which we still consider the user
-  /// to be "at the bottom" of the scroll view. Lets us respect manual
-  /// scroll-back without stealing the viewport on every token.
-  static const double _autoScrollThreshold = 64.0;
+  void _onThrottleChanged() {
+    if (!widget.performanceMonitor.isThrottled || !_isGenerating) return;
+    _stopGeneration();
+    _showSnackBar('Paused to let the device cool down.');
+  }
 
   bool _isNearBottom() {
     if (!_scrollController.hasClients) return true;
@@ -66,168 +76,167 @@ class _ChatScreenState extends State<ChatScreen> {
     return pos.maxScrollExtent - pos.pixels <= _autoScrollThreshold;
   }
 
-  void _scrollToBottom() {
+  /// Scroll to the end after the next layout, at most once per frame.
+  void _scrollToBottom({bool animate = false}) {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
       if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      final end = _scrollController.position.maxScrollExtent;
+      if (animate) {
+        _scrollController.animateTo(
+          end,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(end);
+      }
     });
   }
 
-  void _failGeneration(int aiMessageIndex) {
+  void _showSnackBar(String text) {
     if (!mounted) return;
-    final hadPartial = aiMessageIndex < _messages.length &&
-        _messages[aiMessageIndex].text.isNotEmpty;
-    setState(() {
-      _isGenerating = false;
-      if (aiMessageIndex < _messages.length && !hadPartial) {
-        // No tokens streamed yet — replace empty placeholder with an
-        // inline error so the user sees a response. If a partial response
-        // exists, keep it and notify via SnackBar instead.
-        _messages[aiMessageIndex] = const _ChatMessage(
-          text: 'Something went wrong. Please try again.',
-          isUser: false,
-        );
-      }
-    });
-    widget.performanceMonitor.endSession();
-    if (hadPartial) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Generation interrupted. Partial response shown.'),
-        ),
-      );
-    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> _sendMessage() async {
+  void _sendMessage() {
     final text = _textController.text.trim();
-    if (text.isEmpty || _isGenerating) return;
+    if (text.isEmpty || _isGenerating || _clearing) return;
 
-    // Check throttle before mutating state so the typed message is preserved.
-    if (widget.performanceMonitor.shouldReduceLoad) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(widget.performanceMonitor.statusDescription),
-          ),
-        );
-      }
+    // Check before mutating state so the typed message is preserved.
+    if (widget.performanceMonitor.isThrottled) {
+      _showSnackBar(widget.performanceMonitor.statusDescription);
+      return;
+    }
+    if (!widget.gemmaService.canSend(text)) {
+      _showSnackBar(
+        'That message is too long for the model. Try shortening it.',
+      );
       return;
     }
 
     _textController.clear();
     _focusNode.requestFocus();
 
-    // Add user message + empty AI placeholder for streaming.
+    final userMessage = _ChatMessage(text: text, isUser: true);
+    _replyBuffer.clear();
+    _streamingReply.value = '';
+    final sub = widget.gemmaService
+        .sendMessage(text)
+        .listen(
+          (chunk) => _onChunk(chunk, userMessage),
+          onDone: () => _finishGeneration(userMessage),
+          onError: (Object _) => _finishGeneration(userMessage, failed: true),
+          cancelOnError: true,
+        );
     setState(() {
-      _messages.add(_ChatMessage(text: text, isUser: true));
-      _messages.add(const _ChatMessage(text: '', isUser: false));
-      _isGenerating = true;
+      _messages.add(userMessage);
+      _activeUserMessage = userMessage;
+      _generationSub = sub;
     });
-    final aiMessageIndex = _messages.length - 1;
-    _scrollToBottom();
-
+    _scrollToBottom(animate: true);
     widget.performanceMonitor.startSession();
+  }
 
-    try {
-      final stream = widget.gemmaService.sendMessage(text);
-      _generationSub = stream.listen(
-        (token) {
-          if (!mounted) return;
-          // Capture scroll state *before* the new token grows maxScrollExtent
-          // so an auto-scroll only fires if the user was already at the bottom.
-          final shouldStick = _isNearBottom();
-          setState(() {
-            if (aiMessageIndex < _messages.length) {
-              _messages[aiMessageIndex] = _ChatMessage(
-                text: _messages[aiMessageIndex].text + token,
-                isUser: false,
-              );
-            }
-          });
-          if (shouldStick) _scrollToBottom();
-        },
-        onDone: () {
-          if (!mounted) return;
-          final truncated =
-              widget.gemmaService.wasLastGenerationTruncated;
-          setState(() {
-            _isGenerating = false;
-            if (truncated && aiMessageIndex < _messages.length) {
-              final msg = _messages[aiMessageIndex];
-              _messages[aiMessageIndex] = _ChatMessage(
-                text: msg.text,
-                isUser: false,
-                wasTruncated: true,
-              );
-            }
-          });
-          widget.performanceMonitor.endSession();
-        },
-        onError: (_) async {
-          // Ensure the native side is stopped; the async* generator's finally
-          // usually handles this, but errors surfacing via the subscriber
-          // don't guarantee it, and a lingering `generating` state would
-          // wedge the next sendMessage call.
-          await widget.gemmaService.stopGeneration();
-          _failGeneration(aiMessageIndex);
-        },
-      );
-    } catch (_) {
-      await widget.gemmaService.stopGeneration();
-      _failGeneration(aiMessageIndex);
+  void _onChunk(String chunk, _ChatMessage userMessage) {
+    if (_replyBuffer.isEmpty) _markContextReset(userMessage);
+    final stick = _isNearBottom();
+    _replyBuffer.write(chunk);
+    _streamingReply.value = _replyBuffer.toString();
+    if (stick) _scrollToBottom();
+  }
+
+  void _markContextReset(_ChatMessage userMessage) {
+    if (!widget.gemmaService.didLastMessageResetContext ||
+        userMessage.startsNewContext) {
+      return;
+    }
+    setState(() => userMessage.startsNewContext = true);
+  }
+
+  /// Move the streamed reply into the transcript. Runs once per generation:
+  /// from onDone, onError, or after the cancel in [_stopGeneration].
+  void _finishGeneration(_ChatMessage userMessage, {bool failed = false}) {
+    _generationSub = null;
+    _activeUserMessage = null;
+    widget.performanceMonitor.endSession();
+    if (!mounted) return;
+
+    final reply = _replyBuffer.toString();
+    _replyBuffer.clear();
+    _markContextReset(userMessage);
+    setState(() {
+      if (reply.isNotEmpty) {
+        _messages.add(
+          _ChatMessage(
+            text: reply,
+            isUser: false,
+            wasTruncated:
+                !failed && widget.gemmaService.wasLastGenerationTruncated,
+          )..hasAppeared = true,
+        );
+      } else if (failed) {
+        _messages.add(
+          _ChatMessage(
+            text: 'Something went wrong. Please try again.',
+            isUser: false,
+          ),
+        );
+      }
+    });
+    _streamingReply.value = null;
+    if (failed && reply.isNotEmpty) {
+      _showSnackBar('Generation interrupted. Partial response shown.');
     }
   }
 
   Future<void> _stopGeneration() async {
     final sub = _generationSub;
+    final userMessage = _activeUserMessage;
+    if (sub == null || userMessage == null) return;
+    // Cleared before the await so a second tap cannot finish twice.
     _generationSub = null;
-    await sub?.cancel();
-    await widget.gemmaService.stopGeneration();
-    widget.performanceMonitor.endSession();
-    if (!mounted) return;
-    setState(() => _isGenerating = false);
+    // Cancelling also stops native generation (see GemmaService.sendMessage).
+    await sub.cancel();
+    _finishGeneration(userMessage);
   }
 
   Future<void> _clearChat() async {
-    // Fully tear down any in-flight generation BEFORE clearing history.
-    // InferenceChat.clearHistory() closes and re-creates the native session,
-    // which would race with an active generateChatResponseAsync loop.
-    final sub = _generationSub;
-    _generationSub = null;
-    await sub?.cancel();
-    if (_isGenerating) {
-      await widget.gemmaService.stopGeneration();
-      widget.performanceMonitor.endSession();
+    // Clearing recreates the native session, so tear down the stream first.
+    await _stopGeneration();
+    _clearing = true;
+    try {
+      await widget.gemmaService.clearChat();
+    } catch (_) {
+      _showSnackBar('Could not clear the conversation. Please try again.');
+      return;
+    } finally {
+      _clearing = false;
     }
-    await widget.gemmaService.clearChat();
     if (!mounted) return;
-    setState(() {
-      _messages.clear();
-      _isGenerating = false;
-    });
+    setState(_messages.clear);
   }
 
   @override
   Widget build(BuildContext context) {
+    final hasContent = _messages.isNotEmpty || _isGenerating;
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
-        backgroundColor: _kBgColor,
-        appBar: _buildAppBar(),
+        backgroundColor: AppTheme.background,
+        appBar: _buildAppBar(hasContent),
         body: Column(
           children: [
             _PerformanceBar(
               gemmaService: widget.gemmaService,
               performanceMonitor: widget.performanceMonitor,
             ),
-            // Messages list
             Expanded(
-              child: _messages.isEmpty
+              child: !hasContent
                   ? const _EmptyState()
                   : SelectionArea(
                       child: ListView.builder(
@@ -238,41 +247,24 @@ class _ChatScreenState extends State<ChatScreen> {
                           horizontal: 16,
                           vertical: 12,
                         ),
-                        itemCount: _messages.length,
+                        itemCount: _messages.length + (_isGenerating ? 1 : 0),
                         itemBuilder: (context, index) {
-                          final msg = _messages[index];
-                          // Show typing indicator in place of the empty AI
-                          // placeholder until the first token arrives — avoids
-                          // an empty bubble rendering alongside the indicator.
-                          final isAwaitingFirstToken = _isGenerating &&
-                              index == _messages.length - 1 &&
-                              !msg.isUser &&
-                              msg.text.isEmpty;
-                          if (isAwaitingFirstToken) {
-                            return const TypingIndicator();
+                          if (index == _messages.length) {
+                            return _StreamingReply(reply: _streamingReply);
                           }
-                          return ChatBubble(
-                            text: msg.text,
-                            isUser: msg.isUser,
-                            isStreaming: _isGenerating &&
-                                index == _messages.length - 1 &&
-                                !msg.isUser,
-                            wasTruncated: msg.wasTruncated,
-                          );
+                          return _buildMessage(_messages[index]);
                         },
                       ),
                     ),
             ),
-
-            // Floating input bar — rebuilds when throttle state changes so
-            // the send button accurately reflects whether a send will succeed.
             ListenableBuilder(
               listenable: widget.performanceMonitor,
               builder: (context, _) => _InputBar(
                 controller: _textController,
                 focusNode: _focusNode,
+                maxLength: widget.gemmaService.maxPromptChars,
                 isGenerating: _isGenerating,
-                isThrottled: widget.performanceMonitor.shouldReduceLoad,
+                isThrottled: widget.performanceMonitor.isThrottled,
                 onSend: _sendMessage,
                 onStop: _stopGeneration,
               ),
@@ -283,9 +275,27 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  AppBar _buildAppBar() {
+  Widget _buildMessage(_ChatMessage msg) {
+    // ListView.builder recreates bubbles that scroll back into view; only
+    // play the entrance animation the first time a message is shown.
+    final animate = !msg.hasAppeared;
+    msg.hasAppeared = true;
+    final bubble = ChatBubble(
+      text: msg.text,
+      isUser: msg.isUser,
+      wasTruncated: msg.wasTruncated,
+      animateEntrance: animate,
+    );
+    if (!msg.startsNewContext) return bubble;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [const _ContextResetNotice(), bubble],
+    );
+  }
+
+  AppBar _buildAppBar(bool hasContent) {
     return AppBar(
-      backgroundColor: _kBgColor,
+      backgroundColor: AppTheme.background,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -303,23 +313,62 @@ class _ChatScreenState extends State<ChatScreen> {
         IconButton(
           icon: Icon(
             Icons.delete_outline,
-            // 0.38 is the Material spec for disabled-on-dark; lower values
-            // fail WCAG AA contrast against true-black AppBar background.
-            color: _messages.isEmpty
-                ? Colors.white.withValues(alpha: 0.38)
-                : Colors.white70,
+            // 0.38 is the Material disabled-on-dark opacity; lower fails WCAG
+            // AA against the black app bar.
+            color: hasContent
+                ? Colors.white70
+                : Colors.white.withValues(alpha: 0.38),
           ),
           tooltip: 'Clear chat',
-          onPressed: _messages.isEmpty ? null : _clearChat,
+          onPressed: hasContent ? _clearChat : null,
         ),
       ],
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Performance bar
-// ---------------------------------------------------------------------------
+class _StreamingReply extends StatelessWidget {
+  final ValueListenable<String?> reply;
+
+  const _StreamingReply({required this.reply});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: reply,
+      builder: (context, text, _) {
+        if (text == null || text.isEmpty) return const TypingIndicator();
+        return ChatBubble(text: text, isUser: false, isStreaming: true);
+      },
+    );
+  }
+}
+
+class _ContextResetNotice extends StatelessWidget {
+  const _ContextResetNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SelectionContainer.disabled(
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Expanded(child: Divider(color: AppTheme.track, height: 1)),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                'Earlier messages are no longer in context',
+                style: TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+            ),
+            Expanded(child: Divider(color: AppTheme.track, height: 1)),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _PerformanceBar extends StatelessWidget {
   final GemmaService gemmaService;
@@ -342,14 +391,13 @@ class _PerformanceBar extends StatelessWidget {
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-          color: _kPerfBarColor,
+          color: AppTheme.surfaceSunken,
           child: Row(
             children: [
-              // Offline pill
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: _kAccentColor.withValues(alpha: 0.15),
+                  color: AppTheme.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
@@ -359,7 +407,7 @@ class _PerformanceBar extends StatelessWidget {
                       width: 5,
                       height: 5,
                       decoration: const BoxDecoration(
-                        color: _kAccentColor,
+                        color: AppTheme.accent,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -367,7 +415,7 @@ class _PerformanceBar extends StatelessWidget {
                     const Text(
                       'OFFLINE',
                       style: TextStyle(
-                        color: _kAccentColor,
+                        color: AppTheme.accent,
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.5,
@@ -377,42 +425,29 @@ class _PerformanceBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-
-              // Backend info
               Text(
-                gemmaService.backendInfo,
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                ),
+                gemmaService.backendLabel,
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
-
               const Spacer(),
-
-              // Tokens/sec — only during active generation
               if (isGenerating && tps > 0) ...[
                 Text(
                   '${tps.toStringAsFixed(1)} tok/s',
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
                 const SizedBox(width: 8),
               ],
-
-              // Cooldown indicator (session-time cap hit).
               if (throttled) ...[
                 const Icon(
                   Icons.pause_circle_outline,
                   size: 13,
-                  color: _kErrorColor,
+                  color: AppTheme.error,
                 ),
                 const SizedBox(width: 3),
                 const Text(
                   'COOLDOWN',
                   style: TextStyle(
-                    color: _kErrorColor,
+                    color: AppTheme.error,
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.4,
@@ -427,10 +462,6 @@ class _PerformanceBar extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
@@ -443,8 +474,8 @@ class _EmptyState extends StatelessWidget {
           Container(
             width: 72,
             height: 72,
-            decoration: BoxDecoration(
-              color: _kSurfaceColor,
+            decoration: const BoxDecoration(
+              color: AppTheme.surface,
               shape: BoxShape.circle,
             ),
             child: const Icon(
@@ -466,10 +497,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 8),
           const Text(
             'Running Gemma 4 E2B locally on your device',
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: Colors.white38, fontSize: 13),
           ),
         ],
       ),
@@ -477,13 +505,10 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Input bar
-// ---------------------------------------------------------------------------
-
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final int maxLength;
   final bool isGenerating;
   final bool isThrottled;
   final VoidCallback onSend;
@@ -492,6 +517,7 @@ class _InputBar extends StatelessWidget {
   const _InputBar({
     required this.controller,
     required this.focusNode,
+    required this.maxLength,
     required this.isGenerating,
     required this.isThrottled,
     required this.onSend,
@@ -500,19 +526,19 @@ class _InputBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+    final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     final canSend = !isGenerating && !isThrottled;
 
     return Container(
       padding: EdgeInsets.fromLTRB(12, 10, 12, 10 + bottomPadding),
-      color: _kSurfaceColor,
+      color: AppTheme.surface,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: _kElevatedColor,
+                color: AppTheme.surfaceElevated,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: TextField(
@@ -520,18 +546,17 @@ class _InputBar extends StatelessWidget {
                 focusNode: focusNode,
                 maxLines: 4,
                 minLines: 1,
+                // Keeps a single prompt within the model's context window.
+                maxLength: maxLength,
+                buildCounter: _buildCounter,
                 textInputAction: TextInputAction.send,
-                // Guard hardware-keyboard Enter from firing during generation
-                // or throttle — the _sendMessage guard would silently drop
-                // the user's typed text.
+                // Hardware Enter must not fire while blocked: _sendMessage
+                // would silently drop the typed text.
                 onSubmitted: (_) {
                   if (canSend) onSend();
                 },
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                ),
-                cursorColor: _kAccentColor,
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                cursorColor: AppTheme.accent,
                 decoration: InputDecoration(
                   hintText: 'Message...',
                   hintStyle: const TextStyle(
@@ -554,7 +579,7 @@ class _InputBar extends StatelessWidget {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                     borderSide: const BorderSide(
-                      color: _kAccentColor,
+                      color: AppTheme.accent,
                       width: 1.5,
                     ),
                   ),
@@ -563,12 +588,11 @@ class _InputBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-
-          // Stop button replaces send during generation
           if (isGenerating)
             _ActionButton(
               onPressed: onStop,
-              backgroundColor: _kErrorColor,
+              tooltip: 'Stop',
+              backgroundColor: AppTheme.error,
               child: const Icon(
                 Icons.stop_rounded,
                 color: Colors.white,
@@ -583,8 +607,10 @@ class _InputBar extends StatelessWidget {
                 final enabled = hasText && !isThrottled;
                 return _ActionButton(
                   onPressed: enabled ? onSend : null,
-                  backgroundColor:
-                      enabled ? _kAccentColor : _kDisabledColor,
+                  tooltip: 'Send',
+                  backgroundColor: enabled
+                      ? AppTheme.accent
+                      : AppTheme.disabled,
                   child: Icon(
                     Icons.arrow_upward_rounded,
                     color: enabled ? Colors.white : Colors.white30,
@@ -597,54 +623,78 @@ class _InputBar extends StatelessWidget {
       ),
     );
   }
+
+  /// Show the character counter only near the limit.
+  static Widget? _buildCounter(
+    BuildContext context, {
+    required int currentLength,
+    required bool isFocused,
+    required int? maxLength,
+  }) {
+    if (maxLength == null || currentLength < maxLength * 0.9) return null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 16, bottom: 6),
+      child: Text(
+        '$currentLength / $maxLength',
+        style: const TextStyle(color: Colors.white38, fontSize: 11),
+      ),
+    );
+  }
 }
 
-/// Reusable circular action button for the input bar.
 class _ActionButton extends StatelessWidget {
   final VoidCallback? onPressed;
+  final String tooltip;
   final Color backgroundColor;
   final Widget child;
 
   const _ActionButton({
     required this.onPressed,
+    required this.tooltip,
     required this.backgroundColor,
     required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeInOut,
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        shape: BoxShape.circle,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: Center(child: child),
+    return Tooltip(
+      message: tooltip,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeInOut,
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          shape: BoxShape.circle,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: Center(child: child),
+          ),
         ),
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Data model
-// ---------------------------------------------------------------------------
-
 class _ChatMessage {
   final String text;
   final bool isUser;
   final bool wasTruncated;
 
-  const _ChatMessage({
+  /// Set on the user message whose send started a fresh model context.
+  bool startsNewContext = false;
+
+  /// Whether the bubble has been built once, so its entrance animation is not
+  /// replayed when it scrolls back into view.
+  bool hasAppeared = false;
+
+  _ChatMessage({
     required this.text,
     required this.isUser,
     this.wasTruncated = false,

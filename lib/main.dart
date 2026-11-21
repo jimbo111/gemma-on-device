@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'services/gemma_service.dart';
@@ -9,12 +10,17 @@ import 'theme/app_theme.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Framework init is deferred to SetupScreen so any failure surfaces through
-  // the normal retry UI rather than crashing to a black screen pre-runApp.
-  runApp(OnDeviceAIApp(
-    gemmaService: GemmaService(),
-    performanceMonitor: PerformanceMonitor(),
-  ));
+  // flutter_gemma logs every streamed token and the full prompt history via
+  // debugPrint, which also runs in release. Silence it there: it costs work
+  // per token and writes the user's conversation to the system log.
+  if (kReleaseMode) debugPrint = (String? message, {int? wrapWidth}) {};
+
+  runApp(
+    OnDeviceAIApp(
+      gemmaService: GemmaService(),
+      performanceMonitor: PerformanceMonitor(),
+    ),
+  );
 }
 
 class OnDeviceAIApp extends StatelessWidget {
@@ -43,10 +49,7 @@ class OnDeviceAIApp extends StatelessWidget {
   }
 }
 
-/// Root shell that handles the setup -> chat flow.
-///
-/// On first launch: shows SetupScreen (downloads 2.58 GB model, loads to GPU).
-/// On subsequent launches: loads model from local storage, then shows chat.
+/// Shows [SetupScreen] until the model is loaded, then [ChatScreen].
 class AppShell extends StatefulWidget {
   final GemmaService gemmaService;
   final PerformanceMonitor performanceMonitor;
