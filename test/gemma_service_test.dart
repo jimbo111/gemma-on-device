@@ -94,7 +94,7 @@ void main() {
       expect(service.didLastMessageResetContext, isFalse);
       final sub = service.sendMessage('q').listen((_) {});
       await pumpEventQueue();
-      chat.tokens.add(TextResponse('r' * 1600)); // ~400 tokens, then Stop
+      chat.tokens.add(TextResponse('r' * 1600)); // ~408 tokens, then Stop
       await pumpEventQueue();
       await sub.cancel();
       chat.tokens = StreamController();
@@ -109,6 +109,50 @@ void main() {
     await sub.cancel(); // no token ever arrives
     expect(chat.stopCalls, 1);
     expect(service.isGenerating, isFalse);
+  });
+
+  test('a native error makes the next send start fresh', () async {
+    final error = Completer<void>();
+    service.sendMessage('hi').listen((_) {}, onError: (_) => error.complete());
+    await pumpEventQueue();
+    chat.tokens.addError(Exception('context full'));
+    await error.future;
+    await pumpEventQueue();
+    chat.tokens = StreamController();
+
+    service.sendMessage('again').listen((_) {});
+    await pumpEventQueue();
+    expect(chat.clearCalls, 1);
+    expect(service.didLastMessageResetContext, isTrue);
+  });
+
+  test(
+    'cancelling while the prompt is queued waits, then starts fresh',
+    () async {
+      final gate = Completer<void>();
+      chat.addQueryGate = gate.future;
+      final sub = service.sendMessage('one').listen((_) {});
+      await pumpEventQueue();
+
+      final cancel = sub.cancel();
+      await pumpEventQueue();
+      expect(service.isGenerating, isTrue); // still waiting on addQuery
+      gate.complete();
+      await cancel;
+      expect(service.isGenerating, isFalse);
+      expect(chat.generateCalls, 0);
+
+      chat.addQueryGate = null;
+      service.sendMessage('two').listen((_) {});
+      await pumpEventQueue();
+      expect(chat.clearCalls, 1);
+    },
+  );
+
+  test('clearChat is rejected while generating', () async {
+    service.sendMessage('hi').listen((_) {});
+    await pumpEventQueue();
+    expect(service.clearChat(), throwsStateError);
   });
 
   test('rejects a second send while generating', () async {

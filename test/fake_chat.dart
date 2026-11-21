@@ -7,13 +7,23 @@ class FakeChat implements InferenceChat {
   StreamController<ModelResponse> tokens = StreamController();
   int stopCalls = 0;
   int clearCalls = 0;
+  int generateCalls = 0;
   final List<String> queries = [];
 
-  @override
-  Future<void> addQuery(Message message) async => queries.add(message.text);
+  /// When set, addQuery waits for it, simulating a slow platform round-trip.
+  Future<void>? addQueryGate;
 
   @override
-  Stream<ModelResponse> generateChatResponseAsync() => tokens.stream;
+  Future<void> addQuery(Message message) async {
+    await addQueryGate;
+    queries.add(message.text);
+  }
+
+  @override
+  Stream<ModelResponse> generateChatResponseAsync() {
+    generateCalls++;
+    return tokens.stream;
+  }
 
   @override
   Future<void> stopGeneration() async => stopCalls++;

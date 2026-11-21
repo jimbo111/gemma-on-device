@@ -22,18 +22,39 @@ class ContextBudget {
 
   int get used => _used;
 
-  /// Longest prompt that fits in an otherwise empty conversation.
+  /// Longest ASCII prompt that fits in an otherwise empty conversation.
+  /// Non-ASCII text costs more per character; check [fitsAlone] too.
   int get maxPromptChars => (maxTokens - reservedForReply - _turnOverhead) * 4;
 
-  /// Same ~4 chars/token heuristic LiteRT-LM's Android session uses for
-  /// `sizeInTokens`, plus the turn markers.
-  static int estimate(String text) => (text.length + 3) ~/ 4 + _turnOverhead;
+  /// Conservative token estimate for [text] as one turn: ~4 ASCII chars per
+  /// token, and every other UTF-16 unit as a full token, since CJK, Hangul
+  /// and emoji often tokenize at 1-2 chars per token.
+  static int estimate(String text) {
+    var ascii = 0;
+    var other = 0;
+    for (final unit in text.codeUnits) {
+      unit < 0x80 ? ascii++ : other++;
+    }
+    return (ascii + 3) ~/ 4 + other + _turnOverhead;
+  }
 
   /// Whether [prompt] and a full-length reply fit on top of what is used.
   bool fits(String prompt) =>
       _used + estimate(prompt) + reservedForReply <= maxTokens;
 
-  void add(String turn) => _used += estimate(turn);
+  /// Whether [prompt] fits even in an empty conversation.
+  bool fitsAlone(String prompt) =>
+      estimate(prompt) + reservedForReply <= maxTokens;
+
+  void addPrompt(String prompt) => _used += estimate(prompt);
+
+  /// Charge a reply. [chunks] is the streamed chunk count, which tracks real
+  /// tokens regardless of script; the text estimate covers multi-token chunks.
+  void addReply(String reply, int chunks) {
+    final byText = estimate(reply);
+    final byChunks = chunks + _turnOverhead;
+    _used += byText > byChunks ? byText : byChunks;
+  }
 
   void reset() => _used = 0;
 }

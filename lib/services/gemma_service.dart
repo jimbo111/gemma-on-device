@@ -43,6 +43,12 @@ class GemmaService extends ChangeNotifier {
   bool _lastGenerationTruncated = false;
   bool _lastMessageResetContext = false;
 
+  /// The native conversation may hold state the budget doesn't know about
+  /// (a prompt queued without a reply, or an engine error such as overflow);
+  /// the next send starts fresh.
+  bool _needsContextReset = false;
+  bool _clearing = false;
+
   GemmaService();
 
   /// A service with [chat] already loaded, bypassing download and model init.
@@ -58,12 +64,16 @@ class GemmaService extends ChangeNotifier {
   /// True if the most recent reply hit [maxResponseTokens] before EOS.
   bool get wasLastGenerationTruncated => _lastGenerationTruncated;
 
-  /// True if the most recent [sendMessage] had to start a fresh conversation
-  /// because the prompt would not fit alongside the existing history.
+  /// True if the most recent [sendMessage] had to start a fresh conversation,
+  /// usually because the prompt would not fit alongside the history.
   bool get didLastMessageResetContext => _lastMessageResetContext;
 
-  /// Longest prompt that can be sent.
+  /// Upper bound on prompt length for the text field.
   int get maxPromptChars => _context.maxPromptChars;
+
+  /// Whether [prompt] can be sent at all; non-ASCII text costs more tokens
+  /// per character than [maxPromptChars] assumes.
+  bool canSend(String prompt) => _context.fitsAlone(prompt);
 
   /// Model plus the backend it actually loaded on.
   String get backendLabel => switch (_backend) {
@@ -203,8 +213,8 @@ class GemmaService extends ChangeNotifier {
         StateError('Model not loaded. Call loadModel() first.'),
       );
     }
-    if (_state == GemmaServiceState.generating) {
-      return Stream.error(StateError('Already generating.'));
+    if (_state == GemmaServiceState.generating || _clearing) {
+      return Stream.error(StateError('Busy: generating or clearing.'));
     }
 
     _state = GemmaServiceState.generating;
@@ -220,6 +230,8 @@ class GemmaService extends ChangeNotifier {
     final reply = StringBuffer();
     final out = StreamController<String>();
     StreamSubscription<ModelResponse>? native;
+    Future<void>? queued;
+    var cancelled = false;
     var finished = false;
 
     // Runs exactly once, however the generation ends.
@@ -231,7 +243,7 @@ class GemmaService extends ChangeNotifier {
       // leak into the next reply.
       if (stopNative) await _stopNative(chat);
       // Partial replies still occupy the native context.
-      _context.add(reply.toString());
+      _context.addReply(reply.toString(), _tokensGenerated);
       _generationStopwatch.stop();
       _state = GemmaServiceState.ready;
       notifyListeners();
@@ -250,27 +262,34 @@ class GemmaService extends ChangeNotifier {
       }
     }
 
+    Future<void> queuePrompt() async {
+      if (_needsContextReset || !_context.fits(text)) {
+        await chat.clearHistory();
+        _context.reset();
+        _needsContextReset = false;
+        _lastMessageResetContext = true;
+      }
+      _context.addPrompt(text);
+      await chat.addQuery(Message.text(text: text, isUser: true));
+    }
+
     Future<void> start() async {
       try {
-        if (!_context.fits(text)) {
-          await chat.clearHistory();
-          _context.reset();
-          _lastMessageResetContext = true;
-        }
-        _context.add(text);
-        await chat.addQuery(Message.text(text: text, isUser: true));
+        await (queued = queuePrompt());
       } catch (e, st) {
+        _needsContextReset = true;
         await finish(stopNative: false);
         out.addError(e, st);
         await out.close();
         return;
       }
-      if (finished) return; // Cancelled while the prompt was being queued.
+      if (cancelled) return;
 
       native = chat.generateChatResponseAsync().listen(
         onResponse,
         onError: (Object e, StackTrace st) async {
           if (finished) return;
+          _needsContextReset = true;
           await finish(stopNative: true);
           out.addError(e, st);
           await out.close();
@@ -285,11 +304,22 @@ class GemmaService extends ChangeNotifier {
 
     out
       ..onListen = start
-      ..onCancel = () {
+      ..onCancel = () async {
+        cancelled = true;
+        if (native == null) {
+          // Cancelled while the prompt was being queued. Wait for that to
+          // settle so the next send can't interleave with it; the queued
+          // prompt has no reply, so the next send starts fresh.
+          try {
+            await queued;
+          } catch (_) {}
+          _needsContextReset = true;
+          return finish(stopNative: false);
+        }
         // Not awaited: flutter_gemma's async* stream only observes a cancel
         // at its next yield, which may never come if native is mid-prefill.
         // Stopping native makes it emit done, which unwinds it.
-        unawaited(native?.cancel());
+        unawaited(native!.cancel());
         return finish(stopNative: true);
       };
     return out.stream;
@@ -311,12 +341,22 @@ class GemmaService extends ChangeNotifier {
   }
 
   /// Start a fresh conversation. Cancel any in-flight [sendMessage] first:
-  /// clearing recreates the native session.
+  /// clearing recreates the native session, and sends are rejected until it
+  /// completes.
   Future<void> clearChat() async {
     final chat = _chat;
     if (chat == null) return;
-    await chat.clearHistory();
-    _context.reset();
+    if (_state == GemmaServiceState.generating) {
+      throw StateError('Cancel the in-flight reply before clearing.');
+    }
+    _clearing = true;
+    try {
+      await chat.clearHistory();
+      _context.reset();
+      _needsContextReset = false;
+    } finally {
+      _clearing = false;
+    }
     _tokensGenerated = 0;
     _generationStopwatch.reset();
     notifyListeners();

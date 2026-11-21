@@ -40,6 +40,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final ValueNotifier<String?> _streamingReply = ValueNotifier(null);
   final StringBuffer _replyBuffer = StringBuffer();
   StreamSubscription<String>? _generationSub;
+  _ChatMessage? _activeUserMessage;
+  bool _clearing = false;
   bool _scrollScheduled = false;
 
   bool get _isGenerating => _generationSub != null;
@@ -103,11 +105,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _sendMessage() {
     final text = _textController.text.trim();
-    if (text.isEmpty || _isGenerating) return;
+    if (text.isEmpty || _isGenerating || _clearing) return;
 
     // Check before mutating state so the typed message is preserved.
     if (widget.performanceMonitor.isThrottled) {
       _showSnackBar(widget.performanceMonitor.statusDescription);
+      return;
+    }
+    if (!widget.gemmaService.canSend(text)) {
+      _showSnackBar(
+        'That message is too long for the model. Try shortening it.',
+      );
       return;
     }
 
@@ -127,6 +135,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
     setState(() {
       _messages.add(userMessage);
+      _activeUserMessage = userMessage;
       _generationSub = sub;
     });
     _scrollToBottom(animate: true);
@@ -153,6 +162,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// from onDone, onError, or after the cancel in [_stopGeneration].
   void _finishGeneration(_ChatMessage userMessage, {bool failed = false}) {
     _generationSub = null;
+    _activeUserMessage = null;
     widget.performanceMonitor.endSession();
     if (!mounted) return;
 
@@ -186,10 +196,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _stopGeneration() async {
     final sub = _generationSub;
-    if (sub == null) return;
+    final userMessage = _activeUserMessage;
+    if (sub == null || userMessage == null) return;
     // Cleared before the await so a second tap cannot finish twice.
     _generationSub = null;
-    final userMessage = _messages.lastWhere((m) => m.isUser);
     // Cancelling also stops native generation (see GemmaService.sendMessage).
     await sub.cancel();
     _finishGeneration(userMessage);
@@ -198,11 +208,14 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _clearChat() async {
     // Clearing recreates the native session, so tear down the stream first.
     await _stopGeneration();
+    _clearing = true;
     try {
       await widget.gemmaService.clearChat();
     } catch (_) {
       _showSnackBar('Could not clear the conversation. Please try again.');
       return;
+    } finally {
+      _clearing = false;
     }
     if (!mounted) return;
     setState(_messages.clear);
