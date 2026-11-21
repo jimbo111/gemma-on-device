@@ -16,6 +16,9 @@ class GemmaService extends ChangeNotifier {
       'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/$_modelFileName';
 
   /// Context window the engine is created with: history, prompt and reply.
+  /// Matches the configuration the model card's speed and memory figures
+  /// were measured with; the model supports up to 32k at a higher KV-cache
+  /// cost.
   static const int maxContextTokens = 2048;
 
   /// Per-reply cap that keeps single generations short to limit heat.
@@ -96,7 +99,7 @@ class GemmaService extends ChangeNotifier {
   }
 
   /// Whether the model file was downloaded on a previous run.
-  Future<bool> isModelDownloaded() =>
+  Future<bool> _isModelDownloaded() =>
       FlutterGemma.isModelInstalled(_modelFileName);
 
   /// Register the model with flutter_gemma, downloading it first if needed.
@@ -107,22 +110,21 @@ class GemmaService extends ChangeNotifier {
         _state == GemmaServiceState.generating) {
       throw StateError('Cannot install while ${_state.name}.');
     }
-    final needsDownload = !await isModelDownloaded();
-    if (needsDownload) {
-      _state = GemmaServiceState.downloading;
-      _downloadProgress = 0.0;
-      notifyListeners();
-      await _enableForegroundDownload();
-    }
-
     try {
-      await FlutterGemma.installModel(
-        modelType: ModelType.gemmaIt,
-        fileType: ModelFileType.litertlm,
-      ).fromNetwork(_modelUrl).withProgress((progress) {
-        _downloadProgress = progress / 100.0;
-        notifyListeners();
-      }).install();
+      if (!await _isModelDownloaded()) await _startDownload();
+      await _install();
+
+      // flutter_gemma skips the download whenever its saved record exists,
+      // even if the file is gone (storage cleaned, partial copy). Model init
+      // would then fail and stay failed until restart, because the plugin
+      // caches the failed init. Catch it here, drop the record, re-download.
+      if (!await _activeModelFileIsValid()) {
+        debugPrint('Model record exists but file is missing; re-downloading');
+        await FlutterGemma.uninstallModel(_modelFileName);
+        await _startDownload();
+        await _install();
+      }
+
       _state = GemmaServiceState.downloaded;
       notifyListeners();
     } catch (_) {
@@ -130,6 +132,28 @@ class GemmaService extends ChangeNotifier {
       notifyListeners();
       rethrow;
     }
+  }
+
+  Future<void> _startDownload() async {
+    _state = GemmaServiceState.downloading;
+    _downloadProgress = 0.0;
+    notifyListeners();
+    await _enableForegroundDownload();
+  }
+
+  Future<void> _install() =>
+      FlutterGemma.installModel(
+        modelType: ModelType.gemmaIt,
+        fileType: ModelFileType.litertlm,
+      ).fromNetwork(_modelUrl).withProgress((progress) {
+        _downloadProgress = progress / 100.0;
+        notifyListeners();
+      }).install();
+
+  Future<bool> _activeModelFileIsValid() async {
+    final manager = FlutterGemmaPlugin.instance.modelManager;
+    final spec = manager.activeInferenceModel;
+    return spec != null && await manager.isModelInstalled(spec);
   }
 
   /// Android kills background work after 9 minutes unless it runs as a

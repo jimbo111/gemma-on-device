@@ -81,4 +81,4 @@ iOS support depends on `flutter_gemma` loading `.litertlm` on iOS. The `ios/` sc
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

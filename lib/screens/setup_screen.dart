@@ -19,6 +19,10 @@ class SetupScreen extends StatefulWidget {
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
+const _downloadMessage =
+    'Downloading model. This is a one-time setup.\n'
+    'Allow notifications so it keeps going if you leave the app.';
+
 class _SetupScreenState extends State<SetupScreen>
     with SingleTickerProviderStateMixin {
   String _statusMessage = 'Checking model...';
@@ -59,13 +63,6 @@ class _SetupScreenState extends State<SetupScreen>
       // retry UI instead of a black screen.
       await service.initFramework();
 
-      if (!await service.isModelDownloaded()) {
-        if (!mounted) return;
-        setState(
-          () => _statusMessage =
-              'Downloading model...\nThis is a one-time setup.',
-        );
-      }
       await service.installModel();
 
       if (!mounted) return;
@@ -114,7 +111,11 @@ class _SetupScreenState extends State<SetupScreen>
                   return _ProgressSection(
                     state: widget.gemmaService.state,
                     progress: widget.gemmaService.downloadProgress,
-                    statusMessage: _statusMessage,
+                    statusMessage:
+                        widget.gemmaService.state ==
+                            GemmaServiceState.downloading
+                        ? _downloadMessage
+                        : _statusMessage,
                     hasError: _hasError,
                     isWorking: _isWorking,
                   );
