@@ -2,20 +2,20 @@
 
 A Flutter app that runs **Gemma 4 E2B** entirely on-device — no internet required after initial model download. Private, fast, offline AI chat.
 
-> **Platform note:** Currently **Android only**. iOS support is blocked until Google ships the LiteRT-LM Swift API (the `.litertlm` model format doesn't work on iOS yet).
+> **Platform note:** Currently **Android only**. The model ships as `.litertlm`, which needs LiteRT-LM; `flutter_gemma`'s iOS plugin is MediaPipe-only.
 
 ## What It Does
 
-- Downloads the Gemma 4 E2B model (2.4 GB) on first launch
-- Runs inference locally using GPU acceleration (OpenGL ES / Vulkan)
-- Streams responses token-by-token at ~52 tokens/second
+- Downloads the Gemma 4 E2B model (2.6 GB) on first launch, as a foreground download with a progress notification
+- Runs inference locally on the GPU (OpenCL), falling back to CPU if the GPU backend fails to initialize
+- Streams responses token by token
 - Works 100% offline after setup — no API keys, no server, no data leaves your device
 
 ## Requirements
 
 - **Android**: API 26+ (Android 8.0), 6+ GB RAM recommended
 - **Storage**: ~3 GB free for the model file
-- **First launch**: WiFi connection to download the model
+- **First launch**: Wi-Fi to download the model; on Android 13+ allow notifications so the download keeps running in the background
 - **No HuggingFace token needed** — the model is publicly hosted
 
 ## Getting Started
@@ -34,6 +34,8 @@ flutter run
 
 The app will guide you through model download on first launch.
 
+Run the tests with `flutter test`.
+
 ## Architecture
 
 ```
@@ -42,8 +44,9 @@ lib/
   theme/
     app_theme.dart             — Dark theme system
   services/
-    gemma_service.dart         — Model download, GPU init, streaming inference
-    performance_monitor.dart   — Thermal throttling + session limits
+    gemma_service.dart         — Model download, load (GPU, CPU fallback), streaming chat
+    context_budget.dart        — Context-window accounting; resets the conversation before it overflows
+    performance_monitor.dart   — Sustained-generation cooldown
   screens/
     setup_screen.dart          — First-launch onboarding + download progress
     chat_screen.dart           — Streaming chat UI
@@ -57,12 +60,11 @@ lib/
 | Device | Backend | RAM | TTFT | Decode Speed |
 |--------|---------|-----|------|-------------|
 | Samsung S26 Ultra | GPU | 676 MB | 0.3s | 52.1 tok/s |
-| Samsung S24 Ultra | GPU | ~700 MB | 0.3s | ~50 tok/s |
 
-Built-in safeguards:
-- 512-token generation cap to prevent thermal throttling
-- 2-minute sustained generation limit with cooldown
-- GPU-preferred backend for minimum memory footprint
+Built-in limits:
+- Replies are capped at 512 tokens.
+- The model's context window is 2,048 tokens. When the next prompt plus a full reply would not fit, the app starts a fresh conversation and marks it in the chat.
+- After 2 minutes of sustained generation (idle gaps under 10 s count as sustained), the current reply stops and sending is paused for 10 s.
 
 ## Tech Stack
 
@@ -73,9 +75,9 @@ Built-in safeguards:
 
 ## Why Android Only?
 
-Gemma 4 E2B uses the `.litertlm` model format which requires Google's LiteRT-LM runtime. On Android, this works natively. On iOS, Google hasn't shipped the LiteRT-LM Swift API yet — the iOS path still uses MediaPipe which only supports the older `.task` format. There are no Gemma 4 `.task` files available for iOS.
+Gemma 4 E2B ships in the `.litertlm` format, which requires Google's LiteRT-LM runtime. On Android, `flutter_gemma` uses LiteRT-LM directly. On iOS it still uses MediaPipe, which only loads the older `.task` format, and there is no Gemma 4 E2B `.task` build.
 
-When Google ships the iOS LiteRT-LM API, adding iOS support will be a one-line backend change.
+iOS support depends on `flutter_gemma` loading `.litertlm` on iOS. The `ios/` scaffold is kept for that.
 
 ## License
 
