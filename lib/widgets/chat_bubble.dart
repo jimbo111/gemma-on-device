@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
+
 import '../theme/app_theme.dart';
 
-/// A chat message bubble with a slide-in entrance animation and optional
-/// streaming cursor. User messages slide in from the right; AI from the left.
-///
-/// Public API is intentionally minimal so call sites need no changes:
-///   ChatBubble(text: ..., isUser: ..., isStreaming: ..., wasTruncated: ...)
+/// A chat message bubble with an optional slide-in entrance and a blinking
+/// cursor while streaming. User messages slide in from the right, AI from the
+/// left.
 class ChatBubble extends StatefulWidget {
   final String text;
   final bool isUser;
   final bool isStreaming;
   final bool wasTruncated;
+
+  /// Play the entrance animation. Read once, when the bubble is first built.
+  final bool animateEntrance;
 
   const ChatBubble({
     super.key,
@@ -18,6 +20,7 @@ class ChatBubble extends StatefulWidget {
     required this.isUser,
     this.isStreaming = false,
     this.wasTruncated = false,
+    this.animateEntrance = true,
   });
 
   @override
@@ -37,30 +40,26 @@ class _ChatBubbleState extends State<ChatBubble>
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
+      value: widget.animateEntrance ? 0.0 : 1.0,
     );
 
-    // User slides from right (+x), AI slides from left (-x).
-    final beginOffset = widget.isUser
-        ? const Offset(0.18, 0)
-        : const Offset(-0.18, 0);
-
-    _slideAnimation = Tween<Offset>(begin: beginOffset, end: Offset.zero)
-        .animate(
+    _slideAnimation =
+        Tween<Offset>(
+          begin: Offset(widget.isUser ? 0.18 : -0.18, 0),
+          end: Offset.zero,
+        ).animate(
           CurvedAnimation(
             parent: _entranceController,
             curve: Curves.easeOutCubic,
           ),
         );
 
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _entranceController,
-        // Fade completes in the first 60 % of the slide duration.
-        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-      ),
+    _fadeAnimation = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
     );
 
-    _entranceController.forward();
+    if (widget.animateEntrance) _entranceController.forward();
   }
 
   @override
@@ -71,60 +70,50 @@ class _ChatBubbleState extends State<ChatBubble>
 
   @override
   Widget build(BuildContext context) {
+    final isUser = widget.isUser;
     return FadeTransition(
       opacity: _fadeAnimation,
       child: SlideTransition(
         position: _slideAnimation,
         child: Align(
-          alignment: widget.isUser
+          alignment: isUser
               ? AlignmentDirectional.centerEnd
               : AlignmentDirectional.centerStart,
           child: Container(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.78,
+              maxWidth: MediaQuery.sizeOf(context).width * 0.78,
             ),
             margin: EdgeInsetsDirectional.only(
-              start: widget.isUser ? 48 : 0,
-              end: widget.isUser ? 0 : 48,
+              start: isUser ? 48 : 0,
+              end: isUser ? 0 : 48,
               bottom: 8,
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: widget.isUser ? AppTheme.accent : AppTheme.surface,
-              // Directional so the "tail" (small corner) sits on the user's
-              // side in both LTR and RTL locales.
+              color: isUser ? AppTheme.accent : AppTheme.surface,
+              // Directional so the tail corner sits on the sender's side in
+              // both LTR and RTL locales.
               borderRadius: BorderRadiusDirectional.only(
                 topStart: const Radius.circular(AppTheme.radiusBubble),
                 topEnd: const Radius.circular(AppTheme.radiusBubble),
                 bottomStart: Radius.circular(
-                  widget.isUser
-                      ? AppTheme.radiusBubble
-                      : AppTheme.radiusBubbleTail,
+                  isUser ? AppTheme.radiusBubble : AppTheme.radiusBubbleTail,
                 ),
                 bottomEnd: Radius.circular(
-                  widget.isUser
-                      ? AppTheme.radiusBubbleTail
-                      : AppTheme.radiusBubble,
+                  isUser ? AppTheme.radiusBubbleTail : AppTheme.radiusBubble,
                 ),
               ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x14000000), // rgba(0,0,0,0.08)
-                  blurRadius: 10,
-                  offset: Offset(0, 5),
-                ),
-              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (!widget.isUser)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                if (!isUser)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 4),
                     child: Text(
                       'Gemma',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.accent,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -134,45 +123,10 @@ class _ChatBubbleState extends State<ChatBubble>
                   ),
                 _BubbleText(
                   text: widget.text,
-                  isUser: widget.isUser,
+                  isUser: isUser,
                   isStreaming: widget.isStreaming,
                 ),
-                if (widget.wasTruncated && !widget.isUser) ...[
-                  const SizedBox(height: 6),
-                  // Exclude the meta line from text selection so a long-press
-                  // copy gives just the message body.
-                  SelectionContainer.disabled(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 1),
-                          child: Icon(
-                            Icons.info_outline_rounded,
-                            size: 12,
-                            color: AppTheme.accent,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        // Flexible so the meta line wraps inside the bubble's
-                        // max-width instead of overflowing under large system
-                        // font scales.
-                        Flexible(
-                          child: Text(
-                            'Response truncated at 512 tokens',
-                            style: const TextStyle(
-                              color: AppTheme.accent,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              letterSpacing: 0.2,
-                              height: 1.3,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                if (widget.wasTruncated && !isUser) const _TruncationNote(),
               ],
             ),
           ),
@@ -182,10 +136,48 @@ class _ChatBubbleState extends State<ChatBubble>
   }
 }
 
-// ─── Bubble body text with optional streaming cursor ─────────────────────────
+class _TruncationNote extends StatelessWidget {
+  const _TruncationNote();
 
-/// Renders the message text. While [isStreaming] is true a blinking `|`
-/// cursor is appended inline using a [TextSpan], keeping layout stable.
+  @override
+  Widget build(BuildContext context) {
+    // Excluded from selection so copying a reply gives just the body.
+    return const SelectionContainer.disabled(
+      child: Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.only(top: 1),
+              child: Icon(
+                Icons.info_outline_rounded,
+                size: 12,
+                color: AppTheme.accent,
+              ),
+            ),
+            SizedBox(width: 4),
+            // Flexible so the note wraps under large system font scales.
+            Flexible(
+              child: Text(
+                'Response cut off at the length limit',
+                style: TextStyle(
+                  color: AppTheme.accent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.2,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Message body. While [isStreaming], a blinking cursor follows the text.
 class _BubbleText extends StatefulWidget {
   final String text;
   final bool isUser;
@@ -204,6 +196,7 @@ class _BubbleText extends StatefulWidget {
 class _BubbleTextState extends State<_BubbleText>
     with SingleTickerProviderStateMixin {
   late final AnimationController _cursorController;
+  late final Animation<double> _cursorOpacity;
 
   @override
   void initState() {
@@ -212,18 +205,24 @@ class _BubbleTextState extends State<_BubbleText>
       vsync: this,
       duration: const Duration(milliseconds: 530),
     );
-    if (widget.isStreaming) _cursorController.repeat(reverse: true);
+    _cursorOpacity = CurvedAnimation(
+      parent: _cursorController,
+      curve: Curves.easeInOut,
+    );
+    _syncCursor();
   }
 
   @override
   void didUpdateWidget(_BubbleText oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isStreaming && !_cursorController.isAnimating) {
+    if (oldWidget.isStreaming != widget.isStreaming) _syncCursor();
+  }
+
+  void _syncCursor() {
+    if (widget.isStreaming) {
       _cursorController.repeat(reverse: true);
-    } else if (!widget.isStreaming && _cursorController.isAnimating) {
+    } else {
       _cursorController.stop();
-      // Ensure cursor is invisible after streaming ends.
-      _cursorController.value = 0;
     }
   }
 
@@ -235,38 +234,37 @@ class _BubbleTextState extends State<_BubbleText>
 
   @override
   Widget build(BuildContext context) {
-    final baseColor = widget.isUser ? AppTheme.textPrimary : AppTheme.textBody;
+    final style = TextStyle(
+      color: widget.isUser ? AppTheme.textPrimary : AppTheme.textBody,
+      fontSize: 15,
+      height: 1.45,
+    );
 
-    if (!widget.isStreaming) {
-      return Text(
-        widget.text,
-        style: TextStyle(color: baseColor, fontSize: 15, height: 1.45),
-      );
-    }
+    if (!widget.isStreaming) return Text(widget.text, style: style);
 
-    // Inline blinking cursor via AnimatedBuilder so only the RichText
-    // redraws — the parent bubble layout is unaffected.
-    return AnimatedBuilder(
-      animation: _cursorController,
-      builder: (context, _) {
-        // Ease in/out so the blink feels smooth, not mechanical.
-        final opacity = Curves.easeInOut.transform(_cursorController.value);
-        return RichText(
-          text: TextSpan(
-            style: TextStyle(color: baseColor, fontSize: 15, height: 1.45),
-            children: [
-              TextSpan(text: widget.text),
-              TextSpan(
-                text: ' |',
-                style: TextStyle(
-                  color: AppTheme.accent.withValues(alpha: opacity),
+    // The cursor sits in a WidgetSpan behind a FadeTransition, so blinking
+    // repaints only its own layer instead of re-laying-out the paragraph.
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: widget.text),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: FadeTransition(
+              opacity: _cursorOpacity,
+              child: Text(
+                ' |',
+                style: style.copyWith(
+                  color: AppTheme.accent,
                   fontWeight: FontWeight.w300,
                 ),
               ),
-            ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
+      style: style,
     );
   }
 }
