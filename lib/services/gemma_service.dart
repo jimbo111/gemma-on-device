@@ -75,9 +75,7 @@ class GemmaService extends ChangeNotifier {
       await FlutterGemma.installModel(
         modelType: ModelType.gemmaIt,
         fileType: ModelFileType.litertlm,
-      )
-          .fromNetwork(_modelUrl)
-          .withProgress((progress) {
+      ).fromNetwork(_modelUrl).withProgress((progress) {
         _downloadProgress = progress / 100.0;
         notifyListeners();
       }).install();

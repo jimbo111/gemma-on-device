@@ -11,10 +11,12 @@ void main() {
 
   // Framework init is deferred to SetupScreen so any failure surfaces through
   // the normal retry UI rather than crashing to a black screen pre-runApp.
-  runApp(OnDeviceAIApp(
-    gemmaService: GemmaService(),
-    performanceMonitor: PerformanceMonitor(),
-  ));
+  runApp(
+    OnDeviceAIApp(
+      gemmaService: GemmaService(),
+      performanceMonitor: PerformanceMonitor(),
+    ),
+  );
 }
 
 class OnDeviceAIApp extends StatelessWidget {

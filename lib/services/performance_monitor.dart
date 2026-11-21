@@ -51,13 +51,10 @@ class PerformanceMonitor extends ChangeNotifier {
     notifyListeners();
 
     _cooldownTimer?.cancel();
-    _cooldownTimer = Timer(
-      Duration(seconds: _cooldownDurationSeconds),
-      () {
-        _isThrottled = false;
-        notifyListeners();
-      },
-    );
+    _cooldownTimer = Timer(Duration(seconds: _cooldownDurationSeconds), () {
+      _isThrottled = false;
+      notifyListeners();
+    });
   }
 
   /// Get a user-friendly description of the current performance state.
