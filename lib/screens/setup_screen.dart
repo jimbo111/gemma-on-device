@@ -3,10 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/gemma_service.dart';
 import '../theme/app_theme.dart';
 
-/// Onboarding screen that handles model download and initialization.
-///
-/// Shows download progress for the 2.58 GB Gemma 4 E2B model on first launch.
-/// On subsequent launches, skips straight to model loading (GPU warm-up).
+/// Downloads the 2.6 GB model on first launch, then loads it. Later launches
+/// skip straight to loading.
 class SetupScreen extends StatefulWidget {
   final GemmaService gemmaService;
   final VoidCallback onSetupComplete;
@@ -25,9 +23,8 @@ class _SetupScreenState extends State<SetupScreen>
     with SingleTickerProviderStateMixin {
   String _statusMessage = 'Checking model...';
   bool _hasError = false;
-  // True while _startSetup is awaiting an async step. Without this, the
-  // gemmaService state lingers as `error` for a tick after a retry tap,
-  // and the spinner blinks off.
+  // True while _startSetup is running. The service state lingers as `error`
+  // for a tick after a retry tap; this keeps the spinner from blinking off.
   bool _isWorking = true;
 
   late final AnimationController _pulseController;
@@ -56,30 +53,25 @@ class _SetupScreenState extends State<SetupScreen>
   }
 
   Future<void> _startSetup() async {
+    final service = widget.gemmaService;
     try {
-      // Step 0: Framework init (idempotent). Done here so failures surface
-      // through this retry flow rather than crashing at app launch.
-      await widget.gemmaService.initFramework();
+      // Initialized here rather than in main() so a failure lands on the
+      // retry UI instead of a black screen.
+      await service.initFramework();
 
-      // Step 1: Check if model is already installed
-      final installed = await widget.gemmaService.isModelInstalled();
-
-      if (!installed) {
-        // Step 2a: Download model (first launch)
+      if (!await service.isModelDownloaded()) {
         if (!mounted) return;
         setState(
           () => _statusMessage =
               'Downloading model...\nThis is a one-time setup.',
         );
-        await widget.gemmaService.downloadModel();
       }
+      await service.installModel();
 
-      // Step 3: Load model into GPU memory
       if (!mounted) return;
-      setState(() => _statusMessage = 'Loading model to GPU...');
-      await widget.gemmaService.loadModel();
+      setState(() => _statusMessage = 'Loading model...');
+      await service.loadModel();
 
-      // Done
       if (!mounted) return;
       _isWorking = false;
       widget.onSetupComplete();
@@ -153,10 +145,6 @@ class _SetupScreenState extends State<SetupScreen>
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Sub-widgets
-// ---------------------------------------------------------------------------
 
 class _AppIconArea extends StatelessWidget {
   final Animation<double> pulseAnimation;
@@ -245,12 +233,8 @@ class _ProgressSection extends StatelessWidget {
   bool get _showSpinner {
     if (hasError) return false;
     if (_showDownloadCard) return false;
-    // Show a spinner whenever the screen is mid-setup, regardless of
-    // whether the service state has caught up. This bridges the gap on
-    // retry where state lingers as `error` for a tick.
     if (isWorking) return true;
-    // Explicitly list the "working, no progress bar yet" states so future
-    // enum additions don't silently start showing a spinner.
+    // Listed explicitly so new enum values don't start showing a spinner.
     return state == GemmaServiceState.uninitialized ||
         state == GemmaServiceState.downloaded ||
         state == GemmaServiceState.loading;
@@ -301,9 +285,8 @@ class _DownloadProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final clampedProgress = progress.clamp(0.0, 1.0);
     final percentText = '${(clampedProgress * 100).toStringAsFixed(1)}%';
-    // flutter_gemma only exposes a 0-100 percentage — actual byte totals
-    // aren't available, so we don't fabricate a "X / Y GB" readout.
-    const sizeText = 'One-time download • ~2-3 GB';
+    // flutter_gemma reports only a percentage, not bytes.
+    const sizeText = 'One-time download · 2.6 GB';
 
     return Container(
       width: double.infinity,
@@ -338,7 +321,6 @@ class _DownloadProgressCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // Custom progress track
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: SizedBox(

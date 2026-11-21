@@ -10,6 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_gemma: ^0.13.1
+  # Already pulled in by flutter_gemma; used directly for the download
+  # notification that keeps large downloads in a foreground service.
+  background_downloader: ^9.5.4
 
 dev_dependencies:
   flutter_test:
